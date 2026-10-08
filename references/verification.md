@@ -58,8 +58,9 @@ on Blockscout rather than Etherscan.
 ```bash
 # hardhat: constructor args as a module of decoded values (NOT the hex blob)
 cat > /tmp/args.js <<'EOF'
-module.exports = ["Hood Turtles", "HOOD", "0x…", 2222n, 1000000000000000n, 20n, 20n,
-  "", "", "0x…", 500n, 0, 123n];
+module.exports = ["Nova Nodes", "NOVA", "0x…", 2222n, 1000000000000000n, 20n, 20n,
+  "", "", "0x…", 500n, 0, 123n, "Nova Nodes — agent NFT collection.",
+  "https://agents.example.com/nova/"];
 EOF
 npx hardhat verify --network <name> --constructor-args /tmp/args.js <address>
 ```

@@ -2,7 +2,8 @@
 
 The standing instruction file for Signalbound NFT collections — what an agent runtime
 loads when it is asked to deploy an ERC-721 collection from compiled bytecode, verify it
-on the explorer, mint from it, or read what its contract says.
+on the explorer, mint from it, or read what its contract says. Every token it deploys is
+an agent NFT: an ERC-8004 registration document with an optional RESTAP endpoint.
 
 **Canonical URL: <https://signalbound.art/skill.md>**
 
@@ -22,8 +23,8 @@ directory, e.g. `~/.claude/skills/signalbound.md`.
 
 | File | What it holds |
 | --- | --- |
-| `SKILL.md` | The skill: the two endpoints, the contract's rules, the deploy/verify/mint/read flow, art modes, limits, failures, rules |
-| `references/collection.md` | Constructor, functions, errors, art modes, and both endpoint request/response shapes in full |
+| `SKILL.md` | The skill: the two endpoints, the contract's rules, the deploy/verify/mint/read flow, art modes, agent NFT registration, limits, failures, rules |
+| `references/collection.md` | Constructor, functions, errors, art modes, the agent registration, and both endpoint request/response shapes in full |
 | `references/deploy.md` | The creation transaction in four shapes — Bankr, viem/ethers, chain CLI — plus the confirmation checklist |
 | `references/verification.md` | Every explorer field, the form walkthrough, failure modes |
 

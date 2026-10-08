@@ -1,8 +1,8 @@
 # SignalCollection: the contract and the two endpoints
 
 Everything the skill compresses, in full: the constructor, every function, every error,
-the art modes, and the exact request/response shapes of
-`GET /collections/artifact` and `POST /collections/prepare`.
+the art modes, the agent registration every token carries, and the exact request/response
+shapes of `GET /collections/artifact` and `POST /collections/prepare`.
 
 The contract is one flat Solidity file with **no imports**. Published source, ABI and
 creation bytecode all come from the artifact endpoint, so nothing here needs a compiler
@@ -10,12 +10,12 @@ to verify or a dependency tree to reconstruct.
 
 ## Constructor
 
-Thirteen arguments, in this order. `POST /collections/prepare` ABI-encodes them for you;
+Fifteen arguments, in this order. `POST /collections/prepare` ABI-encodes them for you;
 this table is what the encoded bytes mean.
 
 | # | Argument | Type | Rule |
 | --- | --- | --- | --- |
-| 0 | `name` | `string` | 1–64 characters, required |
+| 0 | `name` | `string` | 1–64 characters, required; no `"`, `\` or control characters (it is written into JSON) |
 | 1 | `symbol` | `string` | 1–16 letters/digits; prepare derives it from the name when absent |
 | 2 | `owner` | `address` | The collection owner. Zero address ⇒ contract takes the deploying account (`msg.sender`) — fine for a direct wallet deploy, wrong through a factory |
 | 3 | `maxSupply` | `uint256` | 1–1,000,000. Immutable |
@@ -28,9 +28,13 @@ this table is what the encoded bytes mean.
 | 10 | `royaltyBps` | `uint96` | 0–10000 (10000 = 100%). `0` disables royalties |
 | 11 | `artStyle` | `uint8` | `0` creature, `1` mosaic, `2` horizon — only used when `baseURI` is empty |
 | 12 | `artSeed` | `uint256` | Seed for the on-chain render; prepare derives one from the name when absent |
+| 13 | `description` | `string` | The `description` in every token's agent registration; empty ⇒ contract writes `An AI agent in the <name> collection.`. No `"`, `\` or control characters |
+| 14 | `agentBaseURI` | `string` | Where each token's agent is served: endpoint = `<agentBaseURI><id>`. Empty ⇒ `"services": []`. No `"`, `\` or control characters |
 
 Reverts at construction: `ZeroSupply`, `ZeroWalletCap`, `CreatorCapAboveSupply`,
-`UnknownArtStyle`, `InvalidRoyalty` (bps > 10000, or bps > 0 with a zero receiver).
+`UnknownArtStyle`, `InvalidRoyalty` (bps > 10000, or bps > 0 with a zero receiver),
+`InvalidMetadataString` (a name, description or agent base URI that would break the
+registration JSON).
 
 The constructor is **not payable** — it takes no value, so the creation transaction
 carries only gas.
@@ -41,13 +45,13 @@ No transaction needed; an agent can phrase any of these as "Read `f()` on `<addr
 
 | Returns | Function |
 | --- | --- |
-| `string` | `name()`, `symbol()`, `baseURI()`, `contractURI()` |
+| `string` | `name()`, `symbol()`, `baseURI()`, `contractURI()`, `agentDescription()`, `agentBaseURI()` |
 | `address` | `owner()`, `royaltyReceiver()` |
 | `uint256` | `totalSupply()`, `maxSupply()`, `mintPrice()`, `maxMintPerWallet()`, `maxCreatorMints()`, `creatorMinted()`, `artSeed()`, `minted(address)` |
 | `uint8` | `artStyle()` |
 | `uint96` | `royaltyBps()` |
 | `bool` | `mintPaused()` |
-| `string` | `tokenURI(uint256)` — hosted `…/<id>.json`, or the on-chain `data:` SVG |
+| `string` | `tokenURI(uint256)` — hosted `…/<id>.json`, or the on-chain registration `data:application/json;base64,…` |
 | `address, uint256` | `royaltyInfo(uint256 tokenId, uint256 salePrice)` |
 | `bool` | `supportsInterface(bytes4)` — `0x01ffc9a7`, `0x80ac58cd`, `0x5b5e139f`, `0x2a55205a` |
 | `uint256`, `address` | `balanceOf(address)`, `ownerOf(uint256)` |
@@ -61,6 +65,8 @@ No transaction needed; an agent can phrase any of these as "Read `f()` on `<addr
 | `mintToCreator(quantity)` | owner | none | Free mint against `maxCreatorMints`, drawn from the same `maxSupply` |
 | `setBaseURI(uri)` | owner | — | Switches `tokenURI` to hosted mode — this is the reveal |
 | `setContractURI(uri)` | owner | — | Collection metadata |
+| `setAgentBaseURI(uri)` | owner | — | Repoints every token's RESTAP endpoint to `<uri><id>`; `InvalidMetadataString` if the URI would break the JSON. Empty string drops the `services` entry |
+| `setAgentDescription(text)` | owner | — | Rewrites every token's registration `description`; `InvalidMetadataString` on `"`, `\` or control characters |
 | `setMintPrice(wei)` | owner | — | Reprice; caps never change |
 | `setMintPaused(bool)` | owner | — | Halt/resume the public mint |
 | `setRoyalty(receiver, bps)` | owner | — | EIP-2981 default royalty; `bps = 0` turns it off |
@@ -75,6 +81,7 @@ reentrant receiver sees the caps it just spent.
 
 `Transfer`, `Approval`, `ApprovalForAll`, `OwnershipTransferred`, `Minted(minter, quantity)`,
 `CreatorMinted(receiver, quantity)`, `BaseURIUpdated`, `ContractURIUpdated`,
+`AgentBaseURIUpdated(agentBaseURI)`, `AgentDescriptionUpdated(agentDescription)`,
 `MintPriceUpdated`, `MintPausedSet`, `RoyaltyUpdated`, `Withdrawn(to, amount)`.
 
 ## Errors
@@ -88,6 +95,7 @@ reentrant receiver sees the caps it just spent.
 | `CreatorCapExceeded(cap)` | reserve empty/zero | Read `creatorMinted()` |
 | `NotOwner` | caller isn't the owner | Read `owner()` |
 | `ZeroOwner` | `transferOwnership(0)` | Ownership cannot be renounced to zero |
+| `InvalidMetadataString` | name, description or agent base URI carries `"`, `\` or a control character | Fix the field in prepare — a JSON string cannot carry them |
 | `ZeroSupply` / `ZeroWalletCap` / `CreatorCapAboveSupply` / `UnknownArtStyle` / `InvalidRoyalty` | constructor/royalty validation | Fix the field prepare named |
 | `NothingToWithdraw` / `WithdrawFailed` | empty balance / rejected transfer | Check the balance or the owner's ability to receive |
 | `ERC721InvalidOwner` | `balanceOf(0)` | — |
@@ -102,13 +110,15 @@ reentrant receiver sees the caps it just spent.
 
 **Hosted (constructor `baseURI` non-empty).**
 `tokenURI(id) = baseURI + id + ".json"` — files must be `1.json`, `2.json`, … under the
-base URL. Any `http`, `https` or `ipfs` base works. `setBaseURI` switches a live contract
-into (or out of) hosted mode, which is how a reveal is done.
+base URL, and each file must be the registration document below, because that is what is
+fetched from the URL. Any `http`, `https` or `ipfs` base works. `setBaseURI` switches a
+live contract into (or out of) hosted mode, which is how a reveal is done.
 
-**On-chain (`baseURI` empty).** The contract renders a 16×16 mirrored pixel image as
-`data:image/svg+xml;base64,…`. Traits come from `keccak256(artSeed, tokenId)`, so a token
-always renders the same bytes. Colour is computed as integer HSL — identical on every
-chain and compiler patch level.
+**On-chain (`baseURI` empty).** The contract renders a 16×16 mirrored pixel image and
+wraps it in the token's registration document (below); the image is the `image` field,
+still a `data:image/svg+xml;base64,…` URI. Traits come from `keccak256(artSeed, tokenId)`,
+so a token always renders the same bytes. Colour is computed as integer HSL — identical
+on every chain and compiler patch level.
 
 | `artStyle` | Name | Composition |
 | --- | --- | --- |
@@ -118,6 +128,34 @@ chain and compiler patch level.
 
 Mirroring: a cell's colour depends only on its distance from the vertical axis, so both
 halves are always identical.
+
+## The agent registration (ERC-8004 + RESTAP)
+
+In on-chain mode `tokenURI(id)` is `data:application/json;base64,<document>`, and the
+document is the contract's own ERC-8004 registration:
+
+```json
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Nova Nodes #7",
+  "description": "Nova Nodes — agent NFT collection.",
+  "image": "data:image/svg+xml;base64,…",
+  "attributes": [{ "trait_type": "style", "value": "creature" }],
+  "services": [
+    { "name": "RESTAP", "endpoint": "https://agents.example.com/nova/7", "version": "0.1.4-beta" }
+  ]
+}
+```
+
+- `name` is `<collection name> #<id>`; `attributes[0]` carries the art style by name.
+- `services` is `[{ name: "RESTAP", endpoint: "<agentBaseURI><id>", version: "0.1.4-beta" }]`
+  when an `agentBaseURI` was set, and `[]` otherwise — an endpoint is only ever claimed
+  when one exists. RESTAP clients append `/.well-known/restap.json`, `POST /talk` and
+  `GET`/`POST /news` to that endpoint.
+- The description falls back to `An AI agent in the <name> collection.` while none is set.
+- The three strings involved (`name`, `description`, `agentBaseURI`) are validated at
+  construction and by `setAgent*`: no `"`, no `\`, no control character, so the JSON is
+  always well-formed without an escape step.
 
 ## GET /collections/artifact
 
@@ -132,8 +170,8 @@ Free, `GET` or `HEAD`, `Cache-Control: public, max-age=300`, CORS `*`.
 | `compiler.settings` | `{ optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: "paris" }` |
 | `abi` | Full ABI, including the constructor |
 | `constructorInputs` | Constructor parameter list (what `prepare` encodes against) |
-| `creationBytecode` | `0x…` — 17,903 bytes of deploy code |
-| `deployedBytecodeSize` | `15645` — runtime under the 24,576-byte code-size limit |
+| `creationBytecode` | `0x…` — 21,565 bytes of deploy code |
+| `deployedBytecodeSize` | `18391` — runtime under the 24,576-byte code-size limit |
 
 Status: `200` · `405` (other methods) · `503` `{ error: "Collection artifact not built" }`
 when the artifact has not been built.
@@ -146,8 +184,8 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
 
 | Field | Type | Required | Default / rule |
 | --- | --- | --- | --- |
-| `name` | string | yes | 1–64 chars |
-| `symbol` | string | no | first 4 letters/digits of the name, uppercased (`"Hood Turtles"` → `HOOD`) |
+| `name` | string | yes | 1–64 chars; no `"`, `\` or control characters |
+| `symbol` | string | no | first 4 letters/digits of the name, uppercased (`"Nova Nodes"` → `NOVA`) |
 | `owner` | `0x` address | no* | zero ⇒ contract takes `msg.sender`; *required in practice when deploying through a factory, and required if you want royalties without naming a receiver |
 | `chainId` | integer ≥ 1 | no | echoed back so the deploy is checked against it |
 | `maxSupply` | integer or string | yes | 1–1,000,000 |
@@ -157,6 +195,8 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
 | `maxCreatorMints` | integer or string | no | `0` |
 | `baseURI` | URL | no | must start `http://`, `https://` or `ipfs://`; trailing `/` appended |
 | `contractURI` | URL | no | same schemes, no trailing rule |
+| `description` | string | no | `"<name> — agent NFT collection."`; ≤ 512 chars; no `"`, `\` or control characters |
+| `agentBaseURI` | URL | no | same schemes as `baseURI`, trailing `/` appended; the endpoint each token declares |
 | `royaltyReceiver` | `0x` address | no | defaults to `owner`; with neither, a nonzero `royaltyBps` is a `400` |
 | `royaltyBps` | integer or string | no | `500` (5%); 0–10000 |
 | `artStyle` | `0`–`2` or `creature` / `mosaic` / `horizon` | no | `0` — only used in on-chain mode |
@@ -170,11 +210,11 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
   "contract": "SignalCollection",
   "chainId": 4663,                       // or null when none was given
   "creationBytecode": "0x…",
-  "constructorArgs": "0x…",              // the 13 arguments, ABI-encoded
+  "constructorArgs": "0x…",              // the 15 arguments, ABI-encoded
   "deployData": "0x…",                   // creationBytecode + constructorArgs
   "params": {                            // echo of everything encoded — read it back
-    "name": "Hood Turtles",
-    "symbol": "HOOD",
+    "name": "Nova Nodes",
+    "symbol": "NOVA",
     "owner": "0x…",                      // or null + ownerNote when not given
     "ownerNote": "…",
     "maxSupply": "2222",
@@ -182,6 +222,8 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
     "maxMintPerWallet": "20",
     "maxCreatorMints": "20",
     "contractURI": "",
+    "description": "Nova Nodes — agent NFT collection.",
+    "agent": { "baseURI": "https://agents.example.com/nova/", "endpoint": "https://agents.example.com/nova/<id>" },
     "royalty": { "receiver": "0x…", "bps": "500" },
     "art": { "mode": "onchain", "baseURI": null, "style": 0, "styleName": "creature", "seed": "…" }
   },
@@ -198,6 +240,9 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
 }
 ```
 
+`params.agent.baseURI` and `params.agent.endpoint` are `null` when no `agentBaseURI`
+was passed.
+
 ### Status codes
 
 | Code | Body | Meaning |
@@ -213,11 +258,13 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
 | Thing | Limit |
 | --- | --- |
 | Name / symbol | 64 chars / 1–16 letters+digits |
+| `description` | 512 chars; no `"`, `\` or control characters |
+| `agentBaseURI` | optional http/https/ipfs URL; trailing `/` appended |
 | `maxSupply` | 1–1,000,000 |
 | `maxMintPerWallet` | 1–`maxSupply`, cumulative |
 | `maxCreatorMints` | ≤ `maxSupply` |
 | Royalty | 0–10000 bps, receiver required above 0 |
 | `mintPrice` | < 1,000,000 ETH (sanity ceiling) |
 | Art styles | 0, 1, 2 |
-| Creation code | 17,903 bytes (≈36 KB hex) |
-| Runtime code | 15,645 bytes / 24,576 limit |
+| Creation code | 21,565 bytes (≈43 KB hex) |
+| Runtime code | 18,391 bytes / 24,576 limit |

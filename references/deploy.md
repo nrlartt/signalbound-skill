@@ -34,7 +34,7 @@ constructor arguments are passed ABI-encoded (which is exactly the shape prepare
 returns), an optional salt fixes the address, and **no native value can be attached** —
 which matches a non-payable constructor.
 
-Our creation bytecode is ~18 KB (≈36 KB of hex). If inline hex is refused as too long,
+Our creation bytecode is ~21.6 KB (≈43 KB of hex). If inline hex is refused as too long,
 save the artifact JSON to file storage first and reference the file instead.
 
 **Not this:** `POST /wallet/submit` with an `EvmTransaction` — its schema requires `to`,
@@ -74,6 +74,7 @@ forge create contracts/SignalCollection.sol:SignalCollection \
   --constructor-args "$NAME" "$SYMBOL" "$OWNER" "$MAX_SUPPLY" "$MINT_PRICE" \
     "$MAX_PER_WALLET" "$CREATOR_MINTS" "$BASE_URI" "$CONTRACT_URI" \
     "$ROYALTY_RECEIVER" "$ROYALTY_BPS" "$ART_STYLE" "$ART_SEED" \
+    "$DESCRIPTION" "$AGENT_BASE_URI" \
   --evm-version paris --optimizer-runs 200
 ```
 
@@ -90,7 +91,7 @@ An HTTP `200` means a transaction you may have sent, not one that landed. All fo
    `transferOwnership` the user did not ask for.
 3. **Rules** — `name()`, `symbol()`, `totalSupply()` (0), `maxSupply()`, `mintPrice()`,
    `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()` or `artStyle()`,
-   `royaltyBps()` match `params`.
+   `agentBaseURI()`, `agentDescription()`, `royaltyBps()` match `params`.
 4. **Verification** — see `verification.md`. Unverified is a real state to report, not
    a detail to skip.
 
@@ -104,6 +105,8 @@ price per mint, supply, per-wallet cap, creator reserve.
 | Give users mint instructions | `mint(quantity)` with exactly `mintPrice × quantity` |
 | The owner keeps a reserve | `mintToCreator(quantity)` while `creatorMinted < maxCreatorMints` |
 | Reveal hosted art later | owner: `setBaseURI("https://…/")` once `1.json`, `2.json`, … exist |
+| Point tokens at the agents | owner: `setAgentBaseURI("https://agents…/")` — endpoint becomes `<uri><id>` |
+| Rewrite what each registration says | owner: `setAgentDescription("…")` |
 | Change the price | owner: `setMintPrice(wei)` |
 | Stop minting | owner: `setMintPaused(true)` |
 | Turn royalties down or off | owner: `setRoyalty(receiver, 0)` |

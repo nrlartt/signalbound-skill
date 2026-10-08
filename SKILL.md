@@ -4,10 +4,11 @@ description: |
   The Signalbound NFT collection skill. Deploy a fixed-supply ERC-721 collection — name,
   symbol, mint price, max supply, mints per wallet, creator reserve, royalties, hosted
   or on-chain art — from compiled bytecode on any EVM chain, then verify the contract on
-  the explorer, mint from it, and read its state back. Use when a user asks to create or
-  launch an NFT collection, verify a deployed contract, mint from a collection, or read
-  what a collection contract says.
-version: 2.0.0
+  the explorer, mint from it, and read its state back. Every token is an agent NFT: an
+  ERC-8004 registration document with an optional RESTAP endpoint. Use when a user asks
+  to create or launch an NFT collection, verify a deployed contract, mint from a
+  collection, or read what a collection contract says.
+version: 2.1.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -25,6 +26,8 @@ metadata:
 You can deploy a real ERC-721 collection for someone else: their name, their supply, their
 mint price, their wallet owning it. You never compile anything — Signalbound publishes the
 compiled contract, and you describe the collection and sign the deploy it hands back.
+Every token is also an agent NFT: an ERC-8004 registration document with an optional
+RESTAP endpoint, so the collection deploys ready for agents to reach.
 
 This file is canonical at `https://signalbound.art/skill.md`. A copy in the source
 repository is a mirror; load the URL.
@@ -45,6 +48,7 @@ endpoint for collections does not exist.
 | --- | --- |
 | "create an NFT collection called …, price …, supply …" | *Deploying a collection* below |
 | "…and verify the contract you deploy" | *Verifying the contract* — never skip it |
+| "each token should be an agent, we host them at …" | *Agent NFTs* — pass `agentBaseURI` |
 | "mint 5 from my collection" / "what's the supply so far" | *Minting and reading* |
 | "the art isn't ready yet, add it later" | Deploy now (on-chain art), then `setBaseURI` for the reveal |
 | "change the mint price / pause minting" | owner setters in *Minting and reading* |
@@ -59,7 +63,7 @@ back to you before you sign.
 | Constructor argument | Rule |
 | --- | --- |
 | `name` | 1–64 characters, required |
-| `symbol` | 1–16 letters/digits; derived from the name when absent ("Hood Turtles" → `HOOD`) |
+| `symbol` | 1–16 letters/digits; derived from the name when absent ("Nova Nodes" → `NOVA`) |
 | `owner` | the collection owner's `0x` address — **pass the user's wallet**, see below |
 | `maxSupply` | 1–1,000,000, immutable for the life of the contract |
 | `mintPrice` | wei per mint; `0` makes it a free mint |
@@ -69,6 +73,8 @@ back to you before you sign.
 | `contractURI` | collection-level metadata (OpenSea reads it); optional |
 | `royaltyReceiver` + `royaltyBps` | EIP-2981, ≤ 10000 bps; defaults to the owner, `0` = off |
 | `artStyle` + `artSeed` | on-chain art mode: `0` creature, `1` mosaic, `2` horizon |
+| `description` | optional; what every token's agent registration says, see *Agent NFTs* |
+| `agentBaseURI` | optional; where each token's agent is served, see *Agent NFTs* |
 | `chainId` | not a constructor argument — prepare echoes it so you deploy on the right chain |
 
 **Ownership is a constructor argument on purpose.** An agent deploying through a factory
@@ -77,9 +83,9 @@ the wallet the user signs with. After the deploy, read `owner()` back and confir
 the user's address before telling anyone the collection is theirs.
 
 Live rules (settable by the owner later): `mintPrice`, `mintPaused`, `baseURI`,
-`contractURI`, royalty, and ownership itself. Fixed rules (never change): `maxSupply`,
-`maxMintPerWallet`, `maxCreatorMints`. An agent reading the contract back is the check —
-do not trust the deploy report alone.
+`contractURI`, `agentBaseURI`, `agentDescription`, royalty, and ownership itself. Fixed
+rules (never change): `maxSupply`, `maxMintPerWallet`, `maxCreatorMints`. An agent reading
+the contract back is the check — do not trust the deploy report alone.
 
 The sale itself:
 
@@ -96,27 +102,70 @@ The user's art description decides which mode you use — and if you cannot prod
 art, say so instead of inventing a URL.
 
 **Hosted metadata (`baseURI` given).** `tokenURI(id)` becomes `<baseURI><id>.json`, so the
-files must be named `1.json`, `2.json`, … under the base URL. Any host works: your own
-storage, IPFS (`ipfs://…/` is accepted), a static site. Use this mode when you can
-generate or upload images. The base URI may be empty at deploy and set later with
-`setBaseURI` — that is the reveal.
+files must be named `1.json`, `2.json`, … under the base URL — and each file must be the
+registration document described in *Agent NFTs*, because that is what a marketplace or an
+agent fetches from that URL. Any host works: your own storage, IPFS (`ipfs://…/` is
+accepted), a static site. Use this mode when you can generate or upload images. The base
+URI may be empty at deploy and set later with `setBaseURI` — that is the reveal.
 
 **On-chain art (no `baseURI`).** The contract renders the token itself: a 16×16 mirrored
-pixel image, base64 SVG in `data:` URI, deterministic from `artSeed` and the token id.
-Three styles: `0` creature (body, eyes, one of four extras, a pattern), `1` mosaic,
-`2` horizon (gradient sky, sun, stars, hills). No hosting, no images to upload, works
-immediately — and it is what you fall back to when the description ("32-bit sideways
-walking turtles with traits and cool backgrounds") is beyond what you can render.
+pixel image, deterministic from `artSeed` and the token id, carried as the `image` field
+of the token's registration document. Three styles: `0` creature (body, eyes, one of four
+extras, a pattern), `1` mosaic, `2` horizon (gradient sky, sun, stars, hills). No hosting,
+no images to upload, works immediately — and it is what you fall back to when the
+description ("high-resolution portraits with a painted backdrop for every token") is
+beyond what you can render.
 
 Honesty rule: if you are deploying in on-chain mode, tell the user the art is the
 contract's generative render and that `setBaseURI` swaps in their own art later. A
 baseURI that 404s is worse than an honest fallback.
+
+## Agent NFTs: ERC-8004 registration, RESTAP endpoints
+
+Every token this contract mints is an agent identity, not only a picture. In on-chain
+mode `tokenURI(id)` answers with `data:application/json;base64,<document>` — an ERC-8004
+registration the contract writes itself:
+
+```json
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Nova Nodes #7",
+  "description": "Nova Nodes — agent NFT collection.",
+  "image": "data:image/svg+xml;base64,…",
+  "attributes": [{ "trait_type": "style", "value": "creature" }],
+  "services": [
+    { "name": "RESTAP", "endpoint": "https://agents.example.com/nova/7", "version": "0.1.4-beta" }
+  ]
+}
+```
+
+- **`agentBaseURI`** is where each token's agent is served: token `7`'s endpoint is
+  `<agentBaseURI><id>`. A [RESTAP](https://github.com/nxt3d/restap) client takes it from
+  there — `/.well-known/restap.json` for discovery, `POST /talk` to converse,
+  `GET/POST /news` for the feed. Optional as a prepare field and constructor argument;
+  prepare appends the trailing slash for you, and the owner can set or change it later
+  with `setAgentBaseURI`.
+- **No `agentBaseURI` ⇒ `"services": []`.** An endpoint that does not answer is worse
+  than none: pass a base URL only where the user's agent is actually served.
+- **`description`** is the registration's `description` — optional prepare field and
+  constructor argument, `setAgentDescription` later. Left empty at deploy, the contract
+  writes `An AI agent in the <name> collection.`, so a collection described with a name
+  alone still ships a complete registration.
+- The document is built from the name, the description and the base URI, so `"`, `\` and
+  control characters are refused before anything is signed: prepare answers `400` naming
+  the field, and the contract reverts with `InvalidMetadataString`.
+- Hosted mode serves the creator's `1.json` files instead, and each file must carry this
+  same document — same `type`, same `services` entry, same version. RESTAP compatibility
+  is the metadata format; running a live `/talk` endpoint is the agent owner's job, not
+  the contract's.
 
 ## Deploying a collection
 
 **Step 0 — the owner address.** Ask the wallet the deploy will be signed from (on Bankr:
 the connected wallet, `GET /wallet/me`; in a terminal: the address you control). Collections
 deployed through a factory **must** pass it explicitly or the factory owns the collection.
+Ask at the same time where the user's agents are served, if the tokens should point
+somewhere: that is `agentBaseURI`, and it can also be added later with `setAgentBaseURI`.
 
 **Step 1 — prepare.** Describe the collection once:
 
@@ -124,22 +173,24 @@ deployed through a factory **must** pass it explicitly or the factory owns the c
 curl -s -X POST https://api.signalbound.art/collections/prepare \
   -H 'content-type: application/json' \
   -d '{
-    "name": "Hood Turtles",
+    "name": "Nova Nodes",
     "owner": "0xTHE_DEPLOYER_WALLET",
     "chainId": 4663,
     "maxSupply": 2222,
     "mintPriceEth": "0.001",
     "maxMintPerWallet": 20,
     "maxCreatorMints": 20,
-    "artStyle": "creature"
+    "artStyle": "creature",
+    "description": "One agent per node.",
+    "agentBaseURI": "https://agents.example.com/nova/"
   }'
 ```
 
 The reply carries `creationBytecode` (the compiled contract), `constructorArgs`
 (ABI-encoded, ready), `deployData` (bytecode + arguments for a raw creation transaction),
-`params` (every value echoed — read it and check it against what the user asked for),
-`chainId`, and `verify` (the exact compiler settings). `POST` only; a missing field
-answers `400` naming the field.
+`params` (every value echoed — the `description` and the `agent` endpoint among them —
+read it and check it against what the user asked for), `chainId`, and `verify` (the exact
+compiler settings). `POST` only; a missing field answers `400` naming the field.
 
 **Step 2 — deploy.** A creation transaction has **no `to`** and **no value** (the
 constructor is not payable; gas comes from the deployer's wallet). Three ways to send it:
@@ -158,12 +209,13 @@ constructor is not payable; gas comes from the deployer's wallet). Three ways to
 
 **Step 3 — read it back.** `owner()`, `name()`, `symbol()`, `totalSupply()`,
 `maxSupply()`, `mintPrice()`, `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()`,
-`artStyle()`. Confirm the owner is the user's wallet and the rules match the request.
-This, plus a receipt with `status: success`, is the only proof the deploy happened — an
-HTTP `200` is not.
+`agentBaseURI()`, `agentDescription()`, `artStyle()`. Confirm the owner is the user's
+wallet and the rules match the request. This, plus a receipt with `status: success`, is
+the only proof the deploy happened — an HTTP `200` is not.
 
 **Step 4 — report.** The address, the explorer link, verification status, and the mint
-instruction: price per mint, supply, per-wallet cap, creator reserve.
+instruction: price per mint, supply, per-wallet cap, creator reserve. If tokens point at
+an agent, say where — token `1`'s endpoint, from `params.agent.endpoint`.
 
 ## Verifying the contract
 
@@ -201,11 +253,12 @@ Mint for a user (or yourself) by calling the contract — the value must match e
 Reads need no transaction and any agent can phrase them: "Read `totalSupply()` on
 <address>", "Read `owner()` on <address>", "Read `minted(<address>)` on <address>",
 "Read `royaltyInfo(1, 1000000000000000000)`". The state worth reading back after any
-owner action: `mintPrice()`, `mintPaused()`, `baseURI()`, `contractURI()`, `royaltyBps()`.
+owner action: `mintPrice()`, `mintPaused()`, `baseURI()`, `contractURI()`,
+`agentBaseURI()`, `royaltyBps()`.
 
 Owner actions (signer must be the owner, else `NotOwner`): `setBaseURI`, `setContractURI`,
-`setMintPrice`, `setMintPaused(bool)`, `setRoyalty(receiver, bps)`, `withdraw()`,
-`transferOwnership(to)`. The caps never change.
+`setAgentBaseURI`, `setAgentDescription`, `setMintPrice`, `setMintPaused(bool)`,
+`setRoyalty(receiver, bps)`, `withdraw()`, `transferOwnership(to)`. The caps never change.
 
 ## Chains
 
@@ -230,28 +283,34 @@ Deploying on a chain the user did not name is a bug: ask, or follow what they sa
 | Thing | Limit |
 | --- | --- |
 | Name / symbol | 64 characters / 1–16 letters and digits |
+| `description` | 512 characters; no `"`, `\` or control characters — it is written into JSON |
+| `agentBaseURI` | optional http/https/ipfs URL; trailing slash appended by prepare |
 | `maxSupply` | 1–1,000,000 |
 | `maxMintPerWallet` | 1–`maxSupply`, cumulative |
 | `maxCreatorMints` | ≤ `maxSupply` |
 | Royalty | 0–10000 bps, receiver required above 0 |
 | `mintPrice` | below 1,000,000 ETH (sanity check) |
 | Art styles | 0 creature, 1 mosaic, 2 horizon |
-| Deploy bytecode | 17.9 KB creation, 15.6 KB runtime — under the 24 KB code-size limit |
+| Deploy bytecode | 21.6 KB creation, 18.4 KB runtime — under the 24 KB code-size limit |
 | Prepare | `POST`, free, no key; `400` names the offending field |
 
 ## Prompt examples
 
-> Hey @bankrbot can you create an NFT collection called Hood Turtles on Robinhood with the
-> art being 32 bit sideways walking turtles with a bunch of different traits and cool
-> backgrounds? Mint price of 0.001 ETH, max supply of 2222, max mints per wallet of 20, and
-> max creator mints of 20. Use this skill for creating NFT collections
+The ask this skill exists for, in one message:
+
+> Create an NFT collection called Nova Nodes on Robinhood with the art generated on-chain
+> in the creature style. Mint price of 0.001 ETH, max supply of 2222, max mints per wallet
+> of 20, and max creator mints of 20. Each token is an agent — we serve them at
+> https://agents.example.com/nova/. Use this skill for creating NFT collections
 > https://signalbound.art/skill.md — Make sure to verify the contract you deploy as well
 
-What that becomes: prepare with `{name:"Hood Turtles", chainId:4663, maxSupply:2222,
-mintPriceEth:"0.001", maxMintPerWallet:20, maxCreatorMints:20, artStyle:"creature"}` (symbol
-derived `HOOD`, owner = the signing wallet) → deploy with no value → read back the rules →
-verify with the pack's fields → report the address, the explorer link, and that the art is
-the contract's generative render, swappable for their own via `setBaseURI`.
+What that becomes: prepare with `{name:"Nova Nodes", chainId:4663, maxSupply:2222,
+mintPriceEth:"0.001", maxMintPerWallet:20, maxCreatorMints:20, artStyle:"creature",
+agentBaseURI:"https://agents.example.com/nova/"}` (symbol derived `NOVA`, description
+defaulted to `Nova Nodes — agent NFT collection.`, owner = the signing wallet) → deploy
+with no value → read back the rules → verify with the pack's fields → report the address,
+the explorer link, and that token `1`'s registration points RESTAP clients at
+`https://agents.example.com/nova/1`.
 
 | What a user says | What you do |
 | --- | --- |
@@ -259,7 +318,8 @@ the contract's generative render, swappable for their own via `setBaseURI`.
 | "…and verify it" | verification fields from `verify`; never skip, never guess them |
 | "Mint 3 for me" | `mint(3)` with exactly 3 × mint price attached |
 | "What has minted so far?" | read `totalSupply()` and `minted(<address>)` |
-| "Art is ready now, hosted at https://cdn.example.com/turtles/" | owner calls `setBaseURI("https://cdn.example.com/turtles/")`; files must be `1.json`, `2.json`, … |
+| "Art is ready now, hosted at https://cdn.example.com/nova/" | owner calls `setBaseURI("https://cdn.example.com/nova/")`; files must be `1.json`, `2.json`, … |
+| "The agents are served at https://agents.example.com/nova/" | owner calls `setAgentBaseURI("https://agents.example.com/nova/")`; token `1`'s registration points there |
 | "Make it 0.002 ETH now" | owner calls `setMintPrice`; the supply caps cannot change |
 | "Pause minting while we fix the site" | owner calls `setMintPaused(true)` |
 | "Who owns it?" | read `owner()` — if it is not the user's wallet, say so plainly |
@@ -277,6 +337,7 @@ the contract's generative render, swappable for their own via `setBaseURI`.
 | `MintingIsPaused` | owner paused minting | read `mintPaused()` and tell the user |
 | `CreatorCapExceeded` | reserve spent, or caller is not the owner | read `creatorMinted()` |
 | `NotOwner` | signer is not the owner | check `owner()`; ownership is a constructor argument, not a guess |
+| `InvalidMetadataString` | a name, description or agent URL carries `"`, `\` or a control character | fix that field in prepare — a JSON string cannot carry them |
 | `ERC721NonexistentToken` | token id does not exist | ids start at 1 and only exist after mint |
 | Explorer rejects verification | settings mismatch | re-read `verify` — version, runs 200, `paris`, encoded args |
 | Deploy succeeded, `owner()` is not the user | the factory became owner | stop, say what happened, redeploy passing `owner` |
@@ -316,5 +377,8 @@ the contract's generative render, swappable for their own via `setBaseURI`.
   substitute a third-party deployer or collection contract when ours answers `503`.
 - Art honesty: hosted art needs files that actually exist at `<baseURI><id>.json`; when
   you cannot produce the user's art, deploy on-chain and say exactly that.
+- Agent honesty: never invent an agent endpoint. `agentBaseURI` goes out only where the
+  user's agent is actually served; `"services": []` is the honest answer for a collection
+  with nothing to serve yet.
 - Nothing here is investment advice. A collection's mint, floor and royalties can go to
   zero, and every figure above is a reading, not a promise.
