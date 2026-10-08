@@ -1,8 +1,8 @@
 # signalbound-skill
 
-The standing instruction file for Signalbound — what an agent runtime loads when it is
-asked to launch a token, trade a market, task an Agent, read the collection, or buy
-onchain intelligence.
+The standing instruction file for Signalbound NFT collections — what an agent runtime
+loads when it is asked to deploy an ERC-721 collection from compiled bytecode, verify it
+on the explorer, mint from it, or read what its contract says.
 
 **Canonical URL: <https://signalbound.art/skill.md>**
 
@@ -22,37 +22,45 @@ directory, e.g. `~/.claude/skills/signalbound.md`.
 
 | File | What it holds |
 | --- | --- |
-| `SKILL.md` | The skill: origins, the write contract, Pump, x402 tools, Agent runtime, limits, failures, rules |
-| `references/pump.md` | Full Pump endpoint, figure and limit tables |
-| `references/tools.md` | x402 tool parameters and reply shapes |
-| `references/x402-payment.md` | The 402 exchange in full |
-| `references/agent-runtime.md` | Manifest, planner, MCP, holder-gated actions |
-| `references/nft-collections.md` | The collection-deploy specification — **not yet served** |
+| `SKILL.md` | The skill: the two endpoints, the contract's rules, the deploy/verify/mint/read flow, art modes, limits, failures, rules |
+| `references/collection.md` | Constructor, functions, errors, art modes, and both endpoint request/response shapes in full |
+| `references/deploy.md` | The creation transaction in four shapes — Bankr, viem/ethers, chain CLI — plus the confirmation checklist |
+| `references/verification.md` | Every explorer field, the form walkthrough, failure modes |
+
+## The capability
+
+`POST https://api.signalbound.art/collections/prepare` encodes the constructor for a
+described collection; `GET https://api.signalbound.art/collections/artifact` publishes
+the compiled contract (creation bytecode, ABI, exact compiler settings, complete
+source). Both are free and need no key. The deploy itself is signed by the wallet that
+owns the collection — this repository never holds, transmits or requests a key.
 
 ## Keeping the two copies in step
 
-`SKILL.md` in this repository and `website/skill.md` in the Signalbound monorepo are
-the same document. Edit both, and move `version:` in the frontmatter when the content
-changes: the version is what tells you which side is behind.
+`SKILL.md` in this repository and `website/skill.md` in the Signalbound monorepo are the
+same document (byte-identical). Edit both, and move `version:` in the frontmatter when
+the content changes: the version is what tells you which side is behind.
 
 ## What is deliberately absent
 
-The skill does not describe an NFT collection-deploy endpoint, because there is not one.
-`references/nft-collections.md` specifies the endpoint, the factory and the verification
-step that will exist, and the skill says plainly that the capability is not served yet.
-An agent should never be left to invent an endpoint that the platform does not run.
+The Pump launchpad, the x402 paid tools, and the Agent runtime are not part of this
+skill — its scope is NFT collections only. There are also no wallet or contract
+addresses in it: the owner comes from the wallet that signs, the chain from the
+user's request, the rules from reading the contract back.
 
 ## Ground rules for edits
 
-- No wallet or contract addresses in the skill: the chain, the contracts and the
-  approved pairs come from `/api/config` on every run.
+- No wallet or contract addresses in the skill or its references: an agent reads state,
+  it does not trust a pasted constant.
 - No private keys, seed phrases or session tokens, and no instruction that would need
-  one.
-- Every figure in the file comes from the handler that enforces it, not from prose.
+  one — a deploy is signed by the wallet that owns the collection.
+- Every figure comes from the handler or the contract that enforces it, not from prose.
 - No promotional language. A skill read by an agent that trades may not recommend,
   guarantee or forecast.
-- A `200` from a prepare route is never described as a confirmation;
-  `GET /api/receipt/:hash` is.
+- An HTTP `200` is never described as a confirmation; a success receipt plus the
+  read-backs (`owner()` and the rules) are.
+- A deploy is unfinished until it is verified — and if verification fails, the skill
+  says to report it as unverified, never as verified.
 
 ## License
 

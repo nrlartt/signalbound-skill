@@ -1,12 +1,13 @@
 ---
 name: signalbound
 description: |
-  The Signalbound skill: launch and trade fixed-supply tokens on the Signalbound Pump
-  curve, task the Agents that operate those markets, read the Signalbound collection, and
-  buy onchain intelligence per call over x402. Use when a user asks to launch a token,
-  quote or place a trade, mint, hire or run an Agent, deploy an NFT collection, or check
-  whether a transaction landed.
-version: 1.0.0
+  The Signalbound NFT collection skill. Deploy a fixed-supply ERC-721 collection — name,
+  symbol, mint price, max supply, mints per wallet, creator reserve, royalties, hosted
+  or on-chain art — from compiled bytecode on any EVM chain, then verify the contract on
+  the explorer, mint from it, and read its state back. Use when a user asks to create or
+  launch an NFT collection, verify a deployed contract, mint from a collection, or read
+  what a collection contract says.
+version: 2.0.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -19,12 +20,11 @@ metadata:
         - curl
 ---
 
-# Signalbound
+# Signalbound collections
 
-Signalbound is an Ethereum collection of 6,666 agent identities — ERC-721 art carrying
-ERC-8004 identities, ERC-8217 bindings and holder-gated tools — plus two things an agent
-can do with it: launch and trade tokens on the **Signalbound Pump** curve, and buy
-onchain intelligence per call over **x402**.
+You can deploy a real ERC-721 collection for someone else: their name, their supply, their
+mint price, their wallet owning it. You never compile anything — Signalbound publishes the
+compiled contract, and you describe the collection and sign the deploy it hands back.
 
 This file is canonical at `https://signalbound.art/skill.md`. A copy in the source
 repository is a mirror; load the URL.
@@ -33,371 +33,288 @@ repository is a mirror; load the URL.
 
 | Origin | Carries |
 | --- | --- |
-| `https://signalbound.art` | The site: collection, Agents, profile, docs — and this file |
-| `https://api.signalbound.art` | x402 tools, MCP gateway, Agent runtime, `.well-known` documents |
-| `https://signalbound.fun` | Signalbound Pump: launches, markets, quotes, unsigned transactions |
+| `https://signalbound.art` | The site, the docs, and this file |
+| `https://api.signalbound.art` | `GET /collections/artifact`, `POST /collections/prepare` — both free, no key, no payment |
 
-Pick the origin by job. Every write comes from `signalbound.fun`; every paid read and
-every Agent-identity document comes from `api.signalbound.art`.
+Two endpoints, that is the whole integration. Anything else claiming to be a Signalbound
+endpoint for collections does not exist.
 
 ## Start here
 
-| The user asks | First call |
+| The user asks | You do |
 | --- | --- |
-| "what is trading", "show me markets" | `GET https://signalbound.fun/api/launches?limit=20` |
-| "quote me a buy of launch 9" | `POST https://signalbound.fun/api/quote/buy` |
-| "launch a token called …" | media upload → `POST /api/prepare/request` → two blocks → `POST /api/prepare/finalize` |
-| "is my transaction landed" | `GET https://signalbound.fun/api/receipt/:hash` |
-| "which Agents can take a job" | `GET https://signalbound.fun/api/operators` |
-| "what can this wallet mint right now" | `POST https://api.signalbound.art/allowlist-scan` |
-| "what is the floor and the best offer" | `POST https://api.signalbound.art/offer-radar` |
-| "run Agent 4210", "what can it do" | `GET https://api.signalbound.art/agents/4210/runtime.json`, then `POST …/agents/4210/plan` |
-| "deploy an NFT collection" | **not served yet** — see *Deploying an NFT collection* |
+| "create an NFT collection called …, price …, supply …" | *Deploying a collection* below |
+| "…and verify the contract you deploy" | *Verifying the contract* — never skip it |
+| "mint 5 from my collection" / "what's the supply so far" | *Minting and reading* |
+| "the art isn't ready yet, add it later" | Deploy now (on-chain art), then `setBaseURI` for the reveal |
+| "change the mint price / pause minting" | owner setters in *Minting and reading* |
+| "deploy on Robinhood / Base / Ethereum" | look the chain up in *Chains*, pass `chainId` to prepare |
 
-## The contract that governs every write
+## The contract: SignalCollection
 
-Three states, and they are never the same thing:
+One flat Solidity file, no imports, compiled for `paris` so its bytecode runs on any EVM
+chain a wallet can be asked to deploy to. Everything is set in the constructor and echoed
+back to you before you sign.
 
-    quote → prepare → sign → send → receipt
-
-- **`POST /api/quote/*`** is a reading. It costs nothing and settles nothing.
-- **`POST /api/prepare/*` answering `200`** means *here is a transaction you may sign*.
-  It writes nothing. It proves nothing.
-- **`GET /api/receipt/:hash` answering `"status": "success"`** is the only proof that
-  anything happened. An HTTP success is not a confirmation.
-
-The service reads contracts and encodes bounded calldata. It holds no key, signs nothing,
-broadcasts nothing — your wallet does all three. Every prepare route answers the same
-envelope:
-
-```json
-{ "transaction": { "to": "0x…", "data": "0x…", "value": "0x…" } }
-```
-
-Send `transaction` unchanged: `to` and `data` are hex, `value` is hex wei and must be
-attached to the transaction. Some responses add `approval` — a transaction to send first —
-and a short `quote` or `terms` object describing what was prepared.
-
-Amounts are integer strings in the smallest unit of the asset: never a decimal, never a
-JSON number. A float loses precision well below these balances.
-
-**Nothing is hardcoded.** The chain, the deployed contracts, the approved pairs and the
-switchable capabilities come from `GET /api/config` on every run. It answers `mainnet` or
-`testnet`, and the addresses differ between them. No address in this file is a deployed
-one.
-
-## Sending the transaction
-
-The prepare reply is what you hand to whatever signs. With Bankr:
-
-```
-@bankr submit transaction to <to> with data <data> value <value> on chain <chainId>
-```
-
-`<chainId>` is `config.chain.id`, `value` is `transaction.value` (omit it when it is
-zero). Bankr's Wallet API takes the same envelope at `POST https://api.bankr.bot/wallet/submit`
-— it requires `to`, `chainId` and a key with arbitrary contract calls enabled
-(`https://docs.bankr.bot/wallet-api/submit`).
-
-Or sign locally with your own JSON-RPC wallet and broadcast the raw transaction. Either
-way the confirmation path is identical: take the hash the signer returned and read
-`GET /api/receipt/:hash` until it answers.
-
-Never send a private key, seed phrase or signed message *to* this protocol. It never asks
-for one and has no use for one.
-
-## Signalbound Pump
-
-Fixed-supply tokens trade on a deterministic curve until the pair's graduation target is
-reached, then move into liquidity with no withdrawal path. Signalbound Agents are the
-operators of those markets: they publish verified work reports and earn a share of the
-trading fee.
-
-### Reads
-
-| Call | Answers |
+| Constructor argument | Rule |
 | --- | --- |
-| `GET /healthz` | service and chain reachability |
-| `GET /api/config` | chain, contracts, capabilities, approved pairs |
-| `GET /api/status` | launch and request counts, current block, launch fee, per-pair economics |
-| `GET /api/fee-policy` | fee split and the live Treasury and buyback recipients |
-| `GET /api/launches?limit=20` | recent markets with token, progress, status |
-| `GET /api/market/:id-or-token` | venue, reserves, progress, Agent team, work evidence |
-| `GET /api/market/:id-or-token/activity` | indexed trades and chart points for one market |
-| `GET /api/profile/:wallet` | created markets, holdings, pair balances, claimable fees |
-| `GET /api/account/:wallet?launchId=:id` | balance and allowance for one market |
-| `GET /api/operators` | work-pool state and capacity |
-| `GET /api/operator/:agentId` | one Agent: holder, vault, opt-in, job count, expiry |
-| `GET /api/work/:launchId/:agentId` | hash-verified work evidence for an assigned Agent |
-| `GET /api/fees/:wallet` | accrued Fee Vault credits per pair |
-| `GET /api/receipt/:hash` | verified status, block and decoded protocol events |
-| `GET /api/usd?symbol=ETH` | display rate. Never a trade input |
+| `name` | 1–64 characters, required |
+| `symbol` | 1–16 letters/digits; derived from the name when absent ("Hood Turtles" → `HOOD`) |
+| `owner` | the collection owner's `0x` address — **pass the user's wallet**, see below |
+| `maxSupply` | 1–1,000,000, immutable for the life of the contract |
+| `mintPrice` | wei per mint; `0` makes it a free mint |
+| `maxMintPerWallet` | 1–`maxSupply`, immutable; counts cumulative mints per address |
+| `maxCreatorMints` | owner's free reserve, ≤ `maxSupply`, immutable; `0` = none |
+| `baseURI` | hosted art, see *Art*; empty string = on-chain art |
+| `contractURI` | collection-level metadata (OpenSea reads it); optional |
+| `royaltyReceiver` + `royaltyBps` | EIP-2981, ≤ 10000 bps; defaults to the owner, `0` = off |
+| `artStyle` + `artSeed` | on-chain art mode: `0` creature, `1` mosaic, `2` horizon |
+| `chainId` | not a constructor argument — prepare echoes it so you deploy on the right chain |
 
-A market id is the launch id or the token contract address. Market `status` is `0` curve
-live, `1` ready to graduate, `2` graduated, `3` recovered and permanently closed.
-`/api/launches?fresh=1` rebuilds the directory from the chain and is limited to 20 calls
-a minute — use it after your own transaction, not in a loop.
+**Ownership is a constructor argument on purpose.** An agent deploying through a factory
+would otherwise become the owner, and no factory is involved here: the deploy comes from
+the wallet the user signs with. After the deploy, read `owner()` back and confirm it is
+the user's address before telling anyone the collection is theirs.
 
-### Trading
+Live rules (settable by the owner later): `mintPrice`, `mintPaused`, `baseURI`,
+`contractURI`, royalty, and ownership itself. Fixed rules (never change): `maxSupply`,
+`maxMintPerWallet`, `maxCreatorMints`. An agent reading the contract back is the check —
+do not trust the deploy report alone.
 
-Quote first, then prepare. Prepare re-reads the chain and rebuilds the calldata, so the
-minimum output it returns is the one that counts; do not hand-carry numbers between the
-two calls.
+The sale itself:
+
+- `mint(quantity)` — send **exactly** `mintPrice × quantity` in native value; any other
+  amount reverts with `WrongPayment`, there is no refund path.
+- `mintToCreator(quantity)` — owner only, free, counts against `maxCreatorMints`.
+- `withdraw()` — owner only, all proceeds to the owner.
+- Standard ERC-721 (`transferFrom`, `safeTransferFrom`, approvals, `tokenURI`) plus
+  EIP-2981 `royaltyInfo` and ERC-165 including `0x2a55205a`.
+
+## Art: hosted or on-chain
+
+The user's art description decides which mode you use — and if you cannot produce the
+art, say so instead of inventing a URL.
+
+**Hosted metadata (`baseURI` given).** `tokenURI(id)` becomes `<baseURI><id>.json`, so the
+files must be named `1.json`, `2.json`, … under the base URL. Any host works: your own
+storage, IPFS (`ipfs://…/` is accepted), a static site. Use this mode when you can
+generate or upload images. The base URI may be empty at deploy and set later with
+`setBaseURI` — that is the reveal.
+
+**On-chain art (no `baseURI`).** The contract renders the token itself: a 16×16 mirrored
+pixel image, base64 SVG in `data:` URI, deterministic from `artSeed` and the token id.
+Three styles: `0` creature (body, eyes, one of four extras, a pattern), `1` mosaic,
+`2` horizon (gradient sky, sun, stars, hills). No hosting, no images to upload, works
+immediately — and it is what you fall back to when the description ("32-bit sideways
+walking turtles with traits and cool backgrounds") is beyond what you can render.
+
+Honesty rule: if you are deploying in on-chain mode, tell the user the art is the
+contract's generative render and that `setBaseURI` swaps in their own art later. A
+baseURI that 404s is worse than an honest fallback.
+
+## Deploying a collection
+
+**Step 0 — the owner address.** Ask the wallet the deploy will be signed from (on Bankr:
+the connected wallet, `GET /wallet/me`; in a terminal: the address you control). Collections
+deployed through a factory **must** pass it explicitly or the factory owns the collection.
+
+**Step 1 — prepare.** Describe the collection once:
 
 ```bash
-SB="https://signalbound.fun"
-
-curl -s -X POST "$SB/api/quote/buy" -H 'content-type: application/json' \
-  -d '{"launchId":"9","amount":"10000000000000000","slippageBps":100}'
-
-curl -s -X POST "$SB/api/prepare/buy" -H 'content-type: application/json' \
-  -d '{"launchId":"9","amount":"10000000000000000","recipient":"0xYOUR_WALLET","slippageBps":100}'
+curl -s -X POST https://api.signalbound.art/collections/prepare \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "Hood Turtles",
+    "owner": "0xTHE_DEPLOYER_WALLET",
+    "chainId": 4663,
+    "maxSupply": 2222,
+    "mintPriceEth": "0.001",
+    "maxMintPerWallet": 20,
+    "maxCreatorMints": 20,
+    "artStyle": "creature"
+  }'
 ```
 
-`slippageBps` accepts 0–1000 (0–10%) and defaults to 100. `recipient` is required on
-prepare and must be a `0x` address. Selling uses `/api/quote/sell` and `/api/prepare/sell`
-with the same fields, `amount` being a token amount in the token's own smallest unit.
+The reply carries `creationBytecode` (the compiled contract), `constructorArgs`
+(ABI-encoded, ready), `deployData` (bytecode + arguments for a raw creation transaction),
+`params` (every value echoed — read it and check it against what the user asked for),
+`chainId`, and `verify` (the exact compiler settings). `POST` only; a missing field
+answers `400` naming the field.
 
-**ERC-20 pairs need an approval first.** `POST /api/prepare/approval` with
-`{launchId, amount, side:"buy"|"sell"}` returns the exact-amount `approve` for the venue.
-A native pair needs no approval and answers `400` if you ask for one. Check
-`GET /api/account/:wallet?launchId=:id` (`pairAllowance`, `tokenAllowance`) before
-spending a transaction on one.
+**Step 2 — deploy.** A creation transaction has **no `to`** and **no value** (the
+constructor is not payable; gas comes from the deployer's wallet). Three ways to send it:
 
-**Opening protection.** For the first five seconds after a curve exists, buys pay a
-time-decaying tax: 99% / 25% / 3% / 0.5% / 0.1%. Ethereum blocks are about twelve seconds
-apart, so a same-block buy pays 99% and a buy one block later pays 0%. The creator and the
-immutable exemption list never pay it; `snipeTaxBps` in a quote is the tier that applies to
-your recipient.
+- **Bankr (chat):** ask it to deploy from compiled creation bytecode, passing
+  `creationBytecode` and `constructorArgs`, no value attached, on `chainId`. Bankr runs
+  this through its deterministic CREATE2 deployer with the constructor arguments
+  ABI-encoded — which is exactly the shape prepare returned. Its raw
+  `POST /wallet/submit` takes no creation transactions (it requires `to`), so deploy
+  through the agent's deploy capability, not that route.
+- **Your own tooling:** viem/ethers `deployContract({ abi, bytecode, args })` using the
+  `abi` from the artifact endpoint, or a raw transaction with `to` omitted and
+  `data = deployData`.
+- **A chain CLI:** `cast create --create --data <deployData>`, or `forge create` against
+  the source in the artifact.
 
-**Graduation.** When `market.status` is `1`, `POST /api/prepare/graduate` with
-`{launchId}` returns a transaction anyone may send. Status becomes `2` only after the
-adapter proves the liquidity lock; a failed attempt leaves the market ready for a retry.
+**Step 3 — read it back.** `owner()`, `name()`, `symbol()`, `totalSupply()`,
+`maxSupply()`, `mintPrice()`, `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()`,
+`artStyle()`. Confirm the owner is the user's wallet and the rules match the request.
+This, plus a receipt with `status: success`, is the only proof the deploy happened — an
+HTTP `200` is not.
 
-### Launching a token
+**Step 4 — report.** The address, the explorer link, verification status, and the mint
+instruction: price per mint, supply, per-wallet cap, creator reserve.
 
-1. **Metadata.** `POST /api/media/image` with `{mediaType, data}` (base64, at most 2 MB)
-   answers an image URL. `POST /api/media/metadata` with `{name, symbol, description,
-   image, website, x, telegram, origination}` — `origination` is `human`, `assisted` or
-   `agent` — answers the `metadataURI`. 30 uploads per hour per address.
-2. **Request.** `POST /api/prepare/request` with `name` (≤64), `symbol` (≤12),
-   `metadataURI` (≤512), `pairAsset` (an approved pair from `/api/config`, native is the
-   zero address), `creatorTaxBps` (0–1000, capped per pair), `snipeTaxExemptions`
-   (≤32 addresses), `requireAgent` (defaults true) and `commitment`.
+## Verifying the contract
 
-   `commitment` is a secret you generate: 32 random bytes kept as `reveal`, and the
-   SHA-256 **of those bytes** — `0x` hex of the digest, hashing the 32 bytes, not their
-   hex text. The factory checks `sha256(reveal)` against it. The response carries
-   `terms.launchFeeWei`; send the prepared transaction with that exact value attached.
-3. **Wait two blocks** — roughly twenty-four seconds. This is what stops a creator from
-   picking a known assignment seed in the same transaction.
-4. **Finalize.** `POST /api/prepare/finalize` with `{requestId, reveal}`. The `requestId`
-   comes from the `LaunchRequested` event in the first receipt. With `developerBuyRaw` set
-   (and `capabilities.atomicFinalizeAndBuy` true) the same call prepares an atomic
-   finalize-and-first-buy.
-5. **Read the second receipt.** `LaunchCreated` carries `launchId`, `token` and `curve`;
-   that `launchId` is the id for every market call above.
+Verification is part of the deploy, not an optional extra. The pack carries everything a
+block explorer asks for:
 
-An unfinalized request is reclaimed with `POST /api/prepare/expire` `{requestId}`, which
-refunds the paid launch fee. No token and no Agent job was created by an unspent request.
+| Field | Where it comes from |
+| --- | --- |
+| Source | `source` in `GET /collections/artifact` — the complete file, no imports to reconstruct |
+| Compiler version | `verify.compiler`, e.g. `0.8.26+commit.8a97fa7a` |
+| Optimization | `verify.optimizerRuns` — `200`, enabled |
+| EVM version | `verify.evmVersion` — `paris`; do not accept a tool's "default" |
+| Constructor arguments | `verify.constructorArgs` — already ABI-encoded, paste as hex |
 
-### Agents on Pump
+With Bankr: "Verify contract <address> on <chain> with this source, compiler …, optimizer
+runs 200, EVM version paris, constructor args …". On an explorer form: single-file
+Solidity, paste the source, pick the version, optimization yes / runs 200, EVM version
+paris, paste the constructor arguments. Re-verification with different settings fails
+loudly — re-read `verify`, do not guess.
 
-Registration happens on the site, not through this API: the holder connects at
-`https://signalbound.art/profile?action=activate`, picks an owned Signalbound NFT and
-completes four steps — ERC-8004 discovery identity, ERC-8217 binding to the NFT, a
-canonical vault ownership proof, then Pump consent (beneficiary plus work-pool opt-in).
-Capacity is one active job per Agent.
+If verification is refused, the deploy is still live and still owned by the user: report
+the address as deployed, unverified, with what you tried. Never claim verified when it
+is not.
 
-- `GET /api/operator/:agentId` — `holder`, `vault`, `optedIn`, `activeJobs`, `maxJobs`,
-  `eligibilityExpiresAt`, `available`. An Agent id is a Signalbound token id, 1–6666.
-- Eligibility needs a recent ownership attestation, an active ERC-8217 binding, the
-  canonical vault in the proof, work-pool opt-in, a nonzero beneficiary and no other
-  active job. `POST /api/operator/attest` prepares the attestation for the holder to
-  sign — 6 calls a minute.
-- `POST /api/prepare/operator-preference` `{agentId, optedIn, beneficiary, maxJobs}` —
-  `maxJobs` must be `1`; there is no other legal value.
-- `GET /api/work/:launchId/:agentId` returns bounded, hash-verified evidence for an Agent
-  assigned to that market: `404` when it is not assigned or has never reported, `503`
-  where `capabilities.workEvidence` is false. No fresh report means no work fee.
-- Claims are pull-based: `POST /api/prepare/claim-fees` `{wallet, asset}` where `asset` is
-  a pair address or `"native"`, `409` when the balance is zero.
-- The project controller hires, replaces and ends Agents with `prepare/hire-operator`,
-  `prepare/replace-primary`, `prepare/terminate-operator` (and
-  `prepare/team-compensation-approval`). The first Agent takes the full operator share,
-  later ones 1–50%, the team tops out at four, and replacement pays compensation to the
-  outgoing beneficiary.
-- An Agent launches its own token only inside the limits a holder set for it. Read
-  `GET /api/agent-launch-mandate/:agentId` first (pair, maximum fee, expiry, remaining
-  launches, maximum creator tax); `POST /api/prepare/agent-mandate` sets them, and the
-  launch must be signed from the Agent's vault.
+## Minting and reading
 
-### Limits
+Mint for a user (or yourself) by calling the contract — the value must match exactly:
+
+| Call | Value to attach |
+| --- | --- |
+| `mint(1)` | one mint price |
+| `mint(5)` | five × mint price |
+| `mintToCreator(n)` | none — owner only, ≤ remaining reserve |
+
+Reads need no transaction and any agent can phrase them: "Read `totalSupply()` on
+<address>", "Read `owner()` on <address>", "Read `minted(<address>)` on <address>",
+"Read `royaltyInfo(1, 1000000000000000000)`". The state worth reading back after any
+owner action: `mintPrice()`, `mintPaused()`, `baseURI()`, `contractURI()`, `royaltyBps()`.
+
+Owner actions (signer must be the owner, else `NotOwner`): `setBaseURI`, `setContractURI`,
+`setMintPrice`, `setMintPaused(bool)`, `setRoyalty(receiver, bps)`, `withdraw()`,
+`transferOwnership(to)`. The caps never change.
+
+## Chains
+
+The contract deploys on any EVM chain whose hardfork includes `paris` (no PUSH0, no
+MCOPY). The chain must still be one your wallet can sign for. Bankr's deploy surface, as
+an example of a wallet that supports this flow end to end:
+
+| Chain | chainId | | Chain | chainId |
+| --- | --- | --- | --- | --- |
+| Ethereum | 1 | | Arbitrum | 42161 |
+| Polygon | 137 | | BNB Chain | 56 |
+| Base | 8453 | | Robinhood Chain | 4663 |
+| Unichain | 130 | | Arc | 5042 |
+| World Chain | 480 | | | |
+
+Pass the `chainId` to prepare so the reply is checked against where you will deploy.
+Deploying on a chain the user did not name is a bug: ask, or follow what they said
+("on Robinhood" → 4663).
+
+## Limits
 
 | Thing | Limit |
 | --- | --- |
-| Slippage | 0–1000 bps, default 100 |
-| Token name / symbol / metadata URI | 1–64 / 1–12 / 512 characters |
-| Creator tax | 0–1000 bps, capped per pair |
-| Opening-tax exemptions | 32 unique addresses |
-| Agent team | 4 active, one job per Agent |
-| Request to finalize | 2 blocks (~24 s) |
-| Token image | 2 MB, 30 uploads per hour |
-| `launches?fresh=1` | 20 per minute |
-| Market activity | 300 per minute |
-| Ownership attestation | 6 per minute |
-
-The full endpoint table, the fee split and the eligibility wording live in
-[references/pump.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/pump.md).
-
-## Collection intelligence over x402
-
-Seven read-only tools on `https://api.signalbound.art`, each `POST` with a JSON body and
-a JSON reply, each carrying a natural-language `brief` alongside the raw arrays:
-
-| Tool | Answers |
-| --- | --- |
-| `POST /drop-radar` | NFT drops that are verifiably active or still ahead |
-| `POST /allowlist-scan` | What one wallet can actually mint right now |
-| `POST /portfolio` | What a wallet holds and what is bid on it |
-| `POST /offer-radar` | Floor, best listing and standing collection offers by spread |
-| `POST /b20-radar` | Base B20 deployments and their market depth |
-| `POST /robinhood-radar` | The most active assets on Robinhood Chain |
-| `POST /intel` | One Signalbound Agent's identity, clearance and market read |
-
-Price list: `GET /.well-known/x402`. Machine-readable schemas: `GET /openapi.json`.
-Parameter tables: [references/tools.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/tools.md).
-
-An unpaid call is not an error — it is the price list:
-
-1. `POST` the body you want.
-2. Read the `402`. The reply carries the terms in the body and, base64, in the
-   `PAYMENT-REQUIRED` header.
-3. Choose between the **open rate** (anyone can pay) and the **discounted rate** (only
-   settles for a wallet holding a qualifying Signalbound NFT). Amounts are atomic units
-   of the named `asset` on the named `network`; settle on that network.
-4. Sign it with an x402-capable wallet and repeat the same call with the value in the
-   `X-PAYMENT` header.
-5. The reply carries `X-Payment-Response` (settlement receipt, base64), `X-Payment-Tier`
-   (`open` or `holder`) and `X-Payment-Facilitator`.
-
-Every authorization is single-use, so a replay cannot double-charge — but signing a *new*
-one for a call that already settled can. When a call is ambiguous, check the transaction
-from the receipt before paying again. Passing `tokenId` (1–6666) on any tool is how the
-discounted rate gets matched to your clearance tier.
-
-The skill chooses no price and pays nothing by itself: an agent that can spend without
-being asked is an agent that can spend without being asked. Details in
-[references/x402-payment.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/x402-payment.md).
-
-## Operating a collection Agent
-
-Each Signalbound NFT is an agent identity with a public runtime:
-
-| Call | Answers |
-| --- | --- |
-| `GET /agents/info/:id` | identity, rarity, clearance, contract links |
-| `GET /agents/:id/runtime.json` | that Agent's runtime card |
-| `GET /.well-known/agent-runtime.json` | whole-surface manifest and endpoint list |
-| `POST /agents/:id/plan` | maps a natural-language task to a tool |
-| `GET /agents/:id/agent.md` · `GET /agents/:id/soul.md` | tool rules and personality |
-| `POST /mcp` | MCP gateway for the same toolset |
-| `GET /agents/:id/collection` · `GET /agents/:id/account` | holdings and balances |
-
-Operating flow: load the runtime card, read `agent.md`, call `/plan` with the user's task
-to select a tool, then execute. The holder-gated tools (ERC-8257) run through
-holder-authenticated flows only — an unauthenticated caller gets the public reads, not the
-capability.
-
-Minting and listing are holder actions and follow the same three states:
-
-- `POST /agents/:id/actions/prepare-mint` → `POST /agents/:id/actions/confirm-mint`
-- `POST /agents/:id/actions/prepare-listing` → `POST /agents/:id/actions/submit-listing`
-
-The prepare call answers `{transaction}`; sign it, then follow the receipt.
-
-## Deploying an NFT collection
-
-**There is no endpoint for this yet.** Signalbound launches ERC-20 tokens on a bonding
-curve (above) and the existing collection can be minted with the tools above. A
-*user-deployable* ERC-721 collection — your name, your symbol, a mint price, a supply cap
-and a per-wallet limit — is specified but not deployed.
-
-Do not invent an endpoint for it, and do not quietly substitute a third-party deployer.
-If a user asks for this today, say plainly that Signalbound does not serve it yet and
-offer what exists: a Pump token launch, a mint through the radar tools, or the spec below
-if they mean to build against it.
-
-The specification the endpoint will answer — a factory on the chain named in
-`/api/config`, `POST https://api.signalbound.art/collections/prepare` returning the same
-`{chainId, to, data, value}` envelope as every other write here, and a `CollectionCreated`
-event you read back through `GET /api/receipt/:hash` — is written down in
-[references/nft-collections.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/nft-collections.md).
-When the factory is deployed, this section names it.
+| Name / symbol | 64 characters / 1–16 letters and digits |
+| `maxSupply` | 1–1,000,000 |
+| `maxMintPerWallet` | 1–`maxSupply`, cumulative |
+| `maxCreatorMints` | ≤ `maxSupply` |
+| Royalty | 0–10000 bps, receiver required above 0 |
+| `mintPrice` | below 1,000,000 ETH (sanity check) |
+| Art styles | 0 creature, 1 mosaic, 2 horizon |
+| Deploy bytecode | 17.9 KB creation, 15.6 KB runtime — under the 24 KB code-size limit |
+| Prepare | `POST`, free, no key; `400` names the offending field |
 
 ## Prompt examples
 
+> Hey @bankrbot can you create an NFT collection called Hood Turtles on Robinhood with the
+> art being 32 bit sideways walking turtles with a bunch of different traits and cool
+> backgrounds? Mint price of 0.001 ETH, max supply of 2222, max mints per wallet of 20, and
+> max creator mints of 20. Use this skill for creating NFT collections
+> https://signalbound.art/skill.md — Make sure to verify the contract you deploy as well
+
+What that becomes: prepare with `{name:"Hood Turtles", chainId:4663, maxSupply:2222,
+mintPriceEth:"0.001", maxMintPerWallet:20, maxCreatorMints:20, artStyle:"creature"}` (symbol
+derived `HOOD`, owner = the signing wallet) → deploy with no value → read back the rules →
+verify with the pack's fields → report the address, the explorer link, and that the art is
+the contract's generative render, swappable for their own via `setBaseURI`.
+
 | What a user says | What you do |
 | --- | --- |
-| "Launch a token called Ledger Line, symbol LDGR, 3% creator tax, native pair" | `GET /api/config` for the approved native pair → media upload → `prepare/request` → wait two blocks → `prepare/finalize` → read `LaunchCreated` |
-| "Buy 0.01 ETH of launch 9, keep slippage under 1%" | `quote/buy` with `amount` in wei and `slippageBps:100` → approval only if the pair is an ERC-20 → `prepare/buy` → sign → `receipt/:hash` |
-| "Is agent 4210 free to take a job?" | `GET /api/operator/4210` — read `available`, `activeJobs`, `maxJobs` and `eligibilityExpiresAt` |
-| "What can this wallet mint right now?" | `POST /allowlist-scan` with `walletAddress` |
-| "Floor and best offer on the top collections?" | `POST /offer-radar` with `slugs` (1–10) |
-| "Run Agent 4210 on 'watch Base liquidity'" | `GET /agents/4210/runtime.json` → `POST /agents/4210/plan` with the task → execute the tool the plan names |
-| "Create an NFT collection called BANKR PUNKS, 0.001 mint, 3333 supply, 33 per wallet, then verify it" | **Not served by Signalbound yet.** Say so, offer a Pump launch or a mint instead, and link the spec above if they intend to build it |
-| "Did my transaction go through?" | `GET /api/receipt/:hash`. Never answer from the prepare's `200` |
+| "Create a collection called Pixie Market on Base, free mint, 1000 supply, no creator reserve" | prepare with `mintPriceEth:"0"`, `maxSupply:1000`, `maxCreatorMints:0`, `chainId:8453`, owner = wallet → deploy → verify → report |
+| "…and verify it" | verification fields from `verify`; never skip, never guess them |
+| "Mint 3 for me" | `mint(3)` with exactly 3 × mint price attached |
+| "What has minted so far?" | read `totalSupply()` and `minted(<address>)` |
+| "Art is ready now, hosted at https://cdn.example.com/turtles/" | owner calls `setBaseURI("https://cdn.example.com/turtles/")`; files must be `1.json`, `2.json`, … |
+| "Make it 0.002 ETH now" | owner calls `setMintPrice`; the supply caps cannot change |
+| "Pause minting while we fix the site" | owner calls `setMintPaused(true)` |
+| "Who owns it?" | read `owner()` — if it is not the user's wallet, say so plainly |
 
 ## When a call fails
 
-| Status | Meaning | What to do |
+| Symptom | Meaning | What to do |
 | --- | --- | --- |
-| 400 | a field is missing or malformed | the message names the field; fix it |
-| 402 | payment required (x402 tools) | nothing was charged; read the terms and decide |
-| 403 | not the wallet that controls this, or the tool's access policy | check which wallet is signing |
-| 404 | unknown id, or a receipt not indexed yet | for `/api/receipt`, retry for a few seconds |
-| 409 | state conflict: curve full, already graduated, nothing to claim, state moved | re-read the market; `409` usually means the state moved |
-| 429 | rate window exhausted | wait it out; do not retry in a loop |
-| 503 | a capability is not configured in this deployment | check `capabilities` in `/api/config`; it is not broken |
-
-A rejected wallet signature creates no transaction — nothing to clean up, just retry. A
-pending transaction stays single-flight: poll `/api/receipt/:hash` until it answers, then
-read `status`, `blockNumber` and `events`.
+| `400` with `field` | prepare rejected a value | the message names the field and the rule; fix that field only |
+| `405` | wrong method | prepare is `POST`; the artifact is `GET` |
+| `503` "artifact not built" | our side has not published the bytecode | say so; do not substitute another contract |
+| `WrongPayment` | value ≠ price × quantity | recompute from `mintPrice()` read on chain |
+| `PerWalletCapExceeded` | order above the cap, or the wallet's cumulative mints hit it | read `minted(<address>)`; the cap is fixed |
+| `SoldOut` | `totalSupply` + order > `maxSupply` | read `totalSupply()`; nothing to do |
+| `MintingIsPaused` | owner paused minting | read `mintPaused()` and tell the user |
+| `CreatorCapExceeded` | reserve spent, or caller is not the owner | read `creatorMinted()` |
+| `NotOwner` | signer is not the owner | check `owner()`; ownership is a constructor argument, not a guess |
+| `ERC721NonexistentToken` | token id does not exist | ids start at 1 and only exist after mint |
+| Explorer rejects verification | settings mismatch | re-read `verify` — version, runs 200, `paris`, encoded args |
+| Deploy succeeded, `owner()` is not the user | the factory became owner | stop, say what happened, redeploy passing `owner` |
+| Out of gas / insufficient funds | deployer pays the deploy gas | the user's wallet needs the chain's native token |
 
 ## For humans
 
 | Where | Address |
 | --- | --- |
-| Collection, Agents, tools | `https://signalbound.art` · `/agents` · `/tools` |
-| Holder profile and activation | `https://signalbound.art/profile?action=activate` |
-| Site and API manual | `https://signalbound.art/docs` |
-| Markets | `https://signalbound.fun/markets` |
-| One market | `https://signalbound.fun/token/:id-or-token` |
-| Wallet positions | `https://signalbound.fun/profile/:address` |
-| Agent on a market | `https://signalbound.fun/agents/:agentId` |
-| Protocol manual | `https://signalbound.fun/docs` — `#integration`, `#errors`, `#site-publishing` |
+| This skill | `https://signalbound.art/skill.md` |
+| Site and docs | `https://signalbound.art` · `https://signalbound.art/docs` |
+| Deploy pack | `https://api.signalbound.art/collections/artifact` |
+| Prepare endpoint | `https://api.signalbound.art/collections/prepare` (POST) |
+| Source and references | `https://github.com/nrlartt/signalbound-skill` |
 
 ## References
 
-- [pump.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/pump.md) — full Pump endpoint and figure tables
-- [tools.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/tools.md) — x402 parameters and reply shapes
-- [x402-payment.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/x402-payment.md) — the 402 exchange in full
-- [agent-runtime.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/agent-runtime.md) — manifest, plan, MCP, holder-gated tools
-- [nft-collections.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/nft-collections.md) — the collection-deploy specification
+- [collection.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/collection.md) — constructor, functions, errors and both endpoints in full
+- [deploy.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/deploy.md) — the deploy recipes: Bankr, viem, cast/forge, and how to confirm one
+- [verification.md](https://raw.githubusercontent.com/nrlartt/signalbound-skill/main/references/verification.md) — every explorer field, plus the failure modes
 
 ## Rules
 
-- Never send a private key, seed phrase or session token anywhere in this protocol. It
-  never asks for one, has no use for one, and cannot act on one.
-- Treat `GET /api/receipt/:hash` as the only confirmation. A `200` from
-  `/api/prepare/*` is a transaction you *may* sign, not one that happened.
-- Take the chain, the contracts and the approved pairs from `/api/config` on every run.
-  Do not carry them from memory or from this file.
-- Show the intent before asking for a signature: which transaction, how much it sends, to
-  which contract. Every `POST /api/prepare/*` is a request for the user's signature.
-- Verify the contract address on the explorer before signing. Names and symbols are not
-  unique, and a market id is not an address.
-- Read `402` as a price and `503` as a switch, never as a failure of the network — and
-  never retry a `429` in a loop.
-- Nothing here is investment advice. Launch tokens and paired assets can lose all value,
-  graduation is a threshold rather than an endorsement, and market figures are readings.
+- Never send a private key, seed phrase or session token anywhere in this flow. Not to the
+  endpoints, not to a deploy, not in chat. A deploy is signed by the wallet that owns it.
+- The owner is the user's wallet, never yours, never a factory's. Read `owner()` after
+  every deploy and say what it answers.
+- Every value you sign comes from prepare's echo (`params`, `constructorArgs`). Do not
+  re-derive, round or hand-carry numbers between calls.
+- Show the intent before asking for a signature: name, symbol, supply, price, caps,
+  royalty, chain, owner — the reply already lists them.
+- A deploy is real when a receipt says success **and** the read-backs match. An HTTP `200`
+  is a transaction you may send, not one that happened.
+- Verify the contract you deploy. If verification fails, report the address as unverified
+  with what you tried — never as verified.
+- Use only the two endpoints in this file. Do not invent one, and do not quietly
+  substitute a third-party deployer or collection contract when ours answers `503`.
+- Art honesty: hosted art needs files that actually exist at `<baseURI><id>.json`; when
+  you cannot produce the user's art, deploy on-chain and say exactly that.
+- Nothing here is investment advice. A collection's mint, floor and royalties can go to
+  zero, and every figure above is a reading, not a promise.
