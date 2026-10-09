@@ -52,8 +52,10 @@ No transaction needed; an agent can phrase any of these as "Read `f()` on `<addr
 | `uint96` | `royaltyBps()` |
 | `bool` | `mintPaused()` |
 | `string` | `tokenURI(uint256)` — hosted `…/<id>.json`, or the on-chain registration `data:application/json;base64,…` |
+| `bytes` | `metadata(uint256 tokenId, string key)` — the ERC-8048 agent profile; empty bytes (`0x`) when unset, never reverts |
+| `address` | `NET()` — Net Protocol's messenger at its fixed address |
 | `address, uint256` | `royaltyInfo(uint256 tokenId, uint256 salePrice)` |
-| `bool` | `supportsInterface(bytes4)` — `0x01ffc9a7`, `0x80ac58cd`, `0x5b5e139f`, `0x2a55205a` |
+| `bool` | `supportsInterface(bytes4)` — `0x01ffc9a7`, `0x80ac58cd`, `0x5b5e139f`, `0x2a55205a`, `0xdf670be1` |
 | `uint256`, `address` | `balanceOf(address)`, `ownerOf(uint256)` |
 | `address`, `bool` | `getApproved(uint256)`, `isApprovedForAll(address, address)` |
 
@@ -70,6 +72,9 @@ No transaction needed; an agent can phrase any of these as "Read `f()` on `<addr
 | `setMintPrice(wei)` | owner | — | Reprice; caps never change |
 | `setMintPaused(bool)` | owner | — | Halt/resume the public mint |
 | `setRoyalty(receiver, bps)` | owner | — | EIP-2981 default royalty; `bps = 0` turns it off |
+| `setMetadata(tokenId, key, value)` | token owner or approved operator | — | Writes one key of the ERC-8048 agent profile; emits `MetadataSet`. Reverts `ERC721InsufficientApproval` for a stranger, `ERC721NonexistentToken` for a token that was never minted |
+| `setContext(tokenId, text)` | token owner or approved operator | — | `setMetadata(tokenId, "context", text)` — the canonical key, brackets cannot be missed |
+| `setEndpoint(tokenId, scheme, uri)` | token owner or approved operator | — | `setMetadata(tokenId, "endpoint[<scheme>]", uri)` |
 | `withdraw()` | owner | — | Entire balance to the owner |
 | `transferOwnership(to)` | owner | — | `to` must not be the zero address |
 | `transferFrom`, `safeTransferFrom` ×2, `approve`, `setApprovalForAll` | standard ERC-721 rules | — | Approvals cleared on transfer |
@@ -82,7 +87,8 @@ reentrant receiver sees the caps it just spent.
 `Transfer`, `Approval`, `ApprovalForAll`, `OwnershipTransferred`, `Minted(minter, quantity)`,
 `CreatorMinted(receiver, quantity)`, `BaseURIUpdated`, `ContractURIUpdated`,
 `AgentBaseURIUpdated(agentBaseURI)`, `AgentDescriptionUpdated(agentDescription)`,
-`MintPriceUpdated`, `MintPausedSet`, `RoyaltyUpdated`, `Withdrawn(to, amount)`.
+`MintPriceUpdated`, `MintPausedSet`, `RoyaltyUpdated`, `Withdrawn(to, amount)`,
+`MetadataSet(tokenId, indexedKey, key, value)` (ERC-8048).
 
 ## Errors
 
@@ -157,6 +163,55 @@ document is the contract's own ERC-8004 registration:
   construction and by `setAgent*`: no `"`, no `\`, no control character, so the JSON is
   always well-formed without an escape step.
 
+## The agent profile (ERC-8048 / ERC-721T)
+
+The registration document is what a marketplace fetches; the profile is what a contract
+reader sees with no HTTP call. The contract implements [ERC-8048](https://eips.ethereum.org/EIPS/eip-8048)
+as [ERC-721T](https://github.com/nxt3d/721t) spells it out: interface id `0xdf670be1`,
+`metadata(tokenId, key) → bytes`, and a `MetadataSet` event carrying both the raw and the
+indexed key.
+
+**Reading.** `metadata(id, key)` returns the stored bytes and never reverts: an unset key
+is `0x`, and a token that was never minted reads `0x` too, so a tool probing a range of
+ids cannot be bricked by a single missing token. Two keys answer from the
+collection-level agent fields when nothing was written per token, which is what makes the
+profile automatic on every mint:
+
+| Key | Answer | Empty case |
+| --- | --- | --- |
+| `context` | `agentDescription`, or `An AI agent in the <name> collection.` | never — a live token always has a context |
+| `endpoint[restap]` | `<agentBaseURI><id>` | no `agentBaseURI` was ever set ⇒ `0x` |
+
+**Writing.** `setMetadata(id, key, value)` stores raw bytes and emits `MetadataSet`.
+Keys are lowercase and case-sensitive; the reserved set is `context`, `endpoint[mcp]`,
+`endpoint[a2a]`, `endpoint[web]` and `address[<chain-id>]` (the value is the 20 raw
+address bytes, not a hex string) — any other `endpoint[<scheme>]` is valid too.
+`setContext(id, text)` and `setEndpoint(id, scheme, uri)` build the canonical key. Only
+the token's owner or an approved operator may write — the same authority as moving the
+token, because the profile is the agent's identity. A stranger reverts
+`ERC721InsufficientApproval`; an id that was never minted reverts `ERC721NonexistentToken`.
+
+Reading it back: `cast call <address> "metadata(uint256,string)(bytes)" 7 "endpoint[restap]"`,
+or viem/ethers `readContract` with the same signature. The value is bytes — decode with
+`cast parse-bytes32-string` or `TextDecoder`, not as an address.
+
+## Activity: Net Protocol
+
+Mints and transfers post themselves to [Net Protocol](https://www.netprotocol.app/)'s
+messenger, `NET()` on the contract — the same address on every chain Net runs on, matching
+how a Net-integrated deployment behaves. One message per event:
+
+| Event | Topic | Text |
+| --- | --- | --- |
+| `mint(quantity)` | `mint` | `Minted #1-#3 to 0x…` (one id when quantity is 1) |
+| `mintToCreator(quantity)` | `mint` | same, addressed to the owner |
+| `transferFrom` / `safeTransferFrom` | `transfer` | `Transferred #2 from 0x… to 0x…` |
+
+Nothing to configure and no field to pass. Where Net is not deployed the post is skipped
+before the call is made, and a Net that reverts cannot hold up a mint or a transfer: the
+post is best-effort by construction, so a collection on an ordinary EVM chain pays a few
+thousand gas per event and loses nothing else.
+
 ## GET /collections/artifact
 
 Free, `GET` or `HEAD`, `Cache-Control: public, max-age=300`, CORS `*`.
@@ -170,8 +225,8 @@ Free, `GET` or `HEAD`, `Cache-Control: public, max-age=300`, CORS `*`.
 | `compiler.settings` | `{ optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: "paris" }` |
 | `abi` | Full ABI, including the constructor |
 | `constructorInputs` | Constructor parameter list (what `prepare` encodes against) |
-| `creationBytecode` | `0x…` — 21,565 bytes of deploy code |
-| `deployedBytecodeSize` | `18391` — runtime under the 24,576-byte code-size limit |
+| `creationBytecode` | `0x…` — 24,195 bytes of deploy code |
+| `deployedBytecodeSize` | `21021` — runtime under the 24,576-byte code-size limit |
 
 Status: `200` · `405` (other methods) · `503` `{ error: "Collection artifact not built" }`
 when the artifact has not been built.
@@ -266,5 +321,5 @@ was passed.
 | Royalty | 0–10000 bps, receiver required above 0 |
 | `mintPrice` | < 1,000,000 ETH (sanity ceiling) |
 | Art styles | 0, 1, 2 |
-| Creation code | 21,565 bytes (≈43 KB hex) |
-| Runtime code | 18,391 bytes / 24,576 limit |
+| Creation code | 24,195 bytes (≈48 KB hex) |
+| Runtime code | 21,021 bytes / 24,576 limit |

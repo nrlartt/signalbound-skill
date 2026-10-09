@@ -5,10 +5,11 @@ description: |
   symbol, mint price, max supply, mints per wallet, creator reserve, royalties, hosted
   or on-chain art — from compiled bytecode on any EVM chain, then verify the contract on
   the explorer, mint from it, and read its state back. Every token is an agent NFT: an
-  ERC-8004 registration document with an optional RESTAP endpoint. Use when a user asks
-  to create or launch an NFT collection, verify a deployed contract, mint from a
-  collection, or read what a collection contract says.
-version: 2.1.0
+  ERC-8004 registration document with an optional RESTAP endpoint, plus an ERC-8048
+  (ERC-721T) agent profile readable on-chain; mint and transfer activity posts itself to
+  Net Protocol. Use when a user asks to create or launch an NFT collection, verify a
+  deployed contract, mint from a collection, or read what a collection contract says.
+version: 2.2.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -27,7 +28,8 @@ You can deploy a real ERC-721 collection for someone else: their name, their sup
 mint price, their wallet owning it. You never compile anything — Signalbound publishes the
 compiled contract, and you describe the collection and sign the deploy it hands back.
 Every token is also an agent NFT: an ERC-8004 registration document with an optional
-RESTAP endpoint, so the collection deploys ready for agents to reach.
+RESTAP endpoint, plus an ERC-8048 (ERC-721T) agent profile readable straight from the
+contract, so the collection deploys ready for agents to reach and for indexers to read.
 
 This file is canonical at `https://signalbound.art/skill.md`. A copy in the source
 repository is a mirror; load the URL.
@@ -94,7 +96,8 @@ The sale itself:
 - `mintToCreator(quantity)` — owner only, free, counts against `maxCreatorMints`.
 - `withdraw()` — owner only, all proceeds to the owner.
 - Standard ERC-721 (`transferFrom`, `safeTransferFrom`, approvals, `tokenURI`) plus
-  EIP-2981 `royaltyInfo` and ERC-165 including `0x2a55205a`.
+  EIP-2981 `royaltyInfo`, the ERC-8048 agent profile (`metadata(id, key)`), and ERC-165
+  including `0x2a55205a` and `0xdf670be1`.
 
 ## Art: hosted or on-chain
 
@@ -159,6 +162,44 @@ registration the contract writes itself:
   is the metadata format; running a live `/talk` endpoint is the agent owner's job, not
   the contract's.
 
+### The agent profile: ERC-8048 (ERC-721T)
+
+The registration document is what a marketplace fetches; the agent profile is what a
+contract reader sees without fetching anything — an [ERC-8048](https://eips.ethereum.org/EIPS/eip-8048)
+key/value surface per token, [ERC-721T](https://github.com/nxt3d/721t)'s reserved keys and
+all:
+
+- **Reads:** `metadata(id, key)` returns the stored bytes, never reverting — an unset key
+  is `0x`, a token that was never minted reads as `0x`, so a probe across a range cannot
+  brick a reader. `supportsInterface` answers true for `0xdf670be1`, so a tool finds the
+  surface with a plain ERC-165 call.
+- **Automatic:** two keys fall back to the collection-level agent fields when nothing was
+  written per token, so every minted token already carries a profile with no per-token
+  write and no extra gas at mint:
+  - `metadata(id, "context")` — the agent's description (`agentDescription`, or the same
+    `An AI agent in the <name> collection.` the registration document writes);
+  - `metadata(id, "endpoint[restap]")` — `<agentBaseURI><id>`, empty when no base was set.
+- **Writes:** `setMetadata(id, key, value)` stores raw bytes and emits `MetadataSet`.
+  Keys are lowercase and case-sensitive; the reserved ones are `context`,
+  `endpoint[mcp]`, `endpoint[a2a]`, `endpoint[web]` and `address[<chain-id>]`
+  (20 raw address bytes) — any other `endpoint[<scheme>]` is allowed too.
+  `setContext(id, text)` and `setEndpoint(id, scheme, uri)` build the canonical key so
+  the brackets cannot be missed.
+- **Who may write:** only the token's owner or an approved operator — the same authority
+  as moving the token, because the profile is the agent's identity. A stranger's write
+  reverts with `ERC721InsufficientApproval`; a token that does not exist reverts with
+  `ERC721NonexistentToken`.
+
+### Activity: Net Protocol
+
+Mints and transfers are posted to [Net Protocol](https://www.netprotocol.app/)'s
+messenger — the same address on every chain Net runs on — so a collection lands in Net's
+data layer the way a Net-integrated deployment does. One text message per event:
+`Minted #1-#3 to 0x…`, `Transferred #2 from 0x… to 0x…`. Nothing to configure and no
+field to pass; where Net is not deployed the post is skipped, and a Net that reverts
+cannot hold up a mint or a transfer either way. It costs a few thousand gas per event
+and buys the collection a place in Net's explorer and bazaar.
+
 ## Deploying a collection
 
 **Step 0 — the owner address.** Ask the wallet the deploy will be signed from (on Bankr:
@@ -211,7 +252,9 @@ constructor is not payable; gas comes from the deployer's wallet). Three ways to
 `maxSupply()`, `mintPrice()`, `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()`,
 `agentBaseURI()`, `agentDescription()`, `artStyle()`. Confirm the owner is the user's
 wallet and the rules match the request. This, plus a receipt with `status: success`, is
-the only proof the deploy happened — an HTTP `200` is not.
+the only proof the deploy happened — an HTTP `200` is not. For an agent collection, also
+read `metadata(1, "endpoint[restap]")`: it is the endpoint the tokens advertise, and it
+is empty if no `agentBaseURI` was ever set.
 
 **Step 4 — report.** The address, the explorer link, verification status, and the mint
 instruction: price per mint, supply, per-wallet cap, creator reserve. If tokens point at
@@ -291,7 +334,7 @@ Deploying on a chain the user did not name is a bug: ask, or follow what they sa
 | Royalty | 0–10000 bps, receiver required above 0 |
 | `mintPrice` | below 1,000,000 ETH (sanity check) |
 | Art styles | 0 creature, 1 mosaic, 2 horizon |
-| Deploy bytecode | 21.6 KB creation, 18.4 KB runtime — under the 24 KB code-size limit |
+| Deploy bytecode | 24.2 KB creation, 21.0 KB runtime — under the 24 KB code-size limit |
 | Prepare | `POST`, free, no key; `400` names the offending field |
 
 ## Prompt examples
