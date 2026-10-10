@@ -6,8 +6,8 @@ description: |
   or on-chain art — from compiled bytecode on any EVM chain, then verify the contract on
   the explorer, mint from it, and read its state back. Every token is an agent NFT: an
   ERC-8004 registration document with an optional RESTAP endpoint, plus an ERC-8048
-  (ERC-721T) agent profile readable on-chain; mint and transfer activity posts itself to
-  Net Protocol. Use when a user asks to create or launch an NFT collection, verify a
+  (ERC-721T) agent profile readable on-chain, and every token publishes the traits its art
+  was drawn from. Use when a user asks to create or launch an NFT collection, verify a
   deployed contract, mint from a collection, or read what a collection contract says.
 version: 2.2.0
 license: CC0-1.0
@@ -135,7 +135,15 @@ registration the contract writes itself:
   "name": "Nova Nodes #7",
   "description": "Nova Nodes — agent NFT collection.",
   "image": "data:image/svg+xml;base64,…",
-  "attributes": [{ "trait_type": "style", "value": "creature" }],
+  "attributes": [
+    { "trait_type": "style", "value": "creature" },
+    { "trait_type": "background", "value": "azure" },
+    { "trait_type": "body", "value": "violet" },
+    { "trait_type": "pattern", "value": "striped" },
+    { "trait_type": "eyes", "value": "narrow" },
+    { "trait_type": "mouth", "value": "small" },
+    { "trait_type": "accessory", "value": "antenna" }
+  ],
   "services": [
     { "name": "RESTAP", "endpoint": "https://agents.example.com/nova/7", "version": "0.1.4-beta" }
   ]
@@ -190,15 +198,28 @@ all:
   reverts with `ERC721InsufficientApproval`; a token that does not exist reverts with
   `ERC721NonexistentToken`.
 
-### Activity: Net Protocol
+### Traits: what the art was drawn from
 
-Mints and transfers are posted to [Net Protocol](https://www.netprotocol.app/)'s
-messenger — the same address on every chain Net runs on — so a collection lands in Net's
-data layer the way a Net-integrated deployment does. One text message per event:
-`Minted #1-#3 to 0x…`, `Transferred #2 from 0x… to 0x…`. Nothing to configure and no
-field to pass; where Net is not deployed the post is skipped, and a Net that reverts
-cannot hold up a mint or a transfer either way. It costs a few thousand gas per event
-and buys the collection a place in Net's explorer and bazaar.
+Every token publishes the parameters its render actually used — as a view and as
+marketplace-ready `attributes`, from the same hash, so the two cannot disagree.
+
+- **`traits(id)`** answers `(string[] names, uint8[] values)` and reverts with
+  `ERC721NonexistentToken` for a token that was never minted.
+- **`attributes`** in the registration spells those numbers out in words — `"azure"`,
+  not `7` — with `style` first so a reader always knows which table the rest came from.
+- The tables differ per style because the styles genuinely vary: **creature** has
+  `background`, `body`, `pattern`, `eyes`, `mouth`, `accessory`; **mosaic** has
+  `background`, `primary`, `accent`, `tile`, `density`; **horizon** has `sky`, `sun`,
+  `ground`, `star`, `cloud`. Six rows, five, five — no invented rows to fill a fixed
+  shape.
+- Colour rows are one of twelve named hue bands (`red`, `orange`, `yellow`,
+  `chartreuse`, `green`, `spring`, `cyan`, `azure`, `blue`, `violet`, `magenta`,
+  `rose`); each other row is its axis's own small vocabulary, and a value outside it
+  reads as empty rather than as a neighbouring word it was never given.
+- None of it is decoration: `tile` and `density` really coarsen the mosaic sampling,
+  `star` and `cloud` really scatter the sky and lay the cloud band, and `eyes` and
+  `mouth` really change the creature's face. A trait that stopped describing the pixels
+  would fail the collection's own tests.
 
 ## Deploying a collection
 

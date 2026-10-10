@@ -53,7 +53,7 @@ No transaction needed; an agent can phrase any of these as "Read `f()` on `<addr
 | `bool` | `mintPaused()` |
 | `string` | `tokenURI(uint256)` — hosted `…/<id>.json`, or the on-chain registration `data:application/json;base64,…` |
 | `bytes` | `metadata(uint256 tokenId, string key)` — the ERC-8048 agent profile; empty bytes (`0x`) when unset, never reverts |
-| `address` | `NET()` — Net Protocol's messenger at its fixed address |
+| `string[], uint8[]` | `traits(uint256 tokenId)` — the trait names and their numeric values for one token; reverts `ERC721NonexistentToken` for an id that was never minted |
 | `address, uint256` | `royaltyInfo(uint256 tokenId, uint256 salePrice)` |
 | `bool` | `supportsInterface(bytes4)` — `0x01ffc9a7`, `0x80ac58cd`, `0x5b5e139f`, `0x2a55205a`, `0xdf670be1` |
 | `uint256`, `address` | `balanceOf(address)`, `ownerOf(uint256)` |
@@ -195,22 +195,57 @@ Reading it back: `cast call <address> "metadata(uint256,string)(bytes)" 7 "endpo
 or viem/ethers `readContract` with the same signature. The value is bytes — decode with
 `cast parse-bytes32-string` or `TextDecoder`, not as an address.
 
-## Activity: Net Protocol
+## Traits
 
-Mints and transfers post themselves to [Net Protocol](https://www.netprotocol.app/)'s
-messenger, `NET()` on the contract — the same address on every chain Net runs on, matching
-how a Net-integrated deployment behaves. One message per event:
+`traits(id)` and the registration's `attributes` answer from the same hash, so the words a
+marketplace shows and the pixels the contract draws cannot drift apart.
 
-| Event | Topic | Text |
-| --- | --- | --- |
-| `mint(quantity)` | `mint` | `Minted #1-#3 to 0x…` (one id when quantity is 1) |
-| `mintToCreator(quantity)` | `mint` | same, addressed to the owner |
-| `transferFrom` / `safeTransferFrom` | `transfer` | `Transferred #2 from 0x… to 0x…` |
+```ts
+const [names, values] = await readContract({ // string[], uint8[]
+  functionName: "traits", args: [tokenId],
+});
+```
 
-Nothing to configure and no field to pass. Where Net is not deployed the post is skipped
-before the call is made, and a Net that reverts cannot hold up a mint or a transfer: the
-post is best-effort by construction, so a collection on an ordinary EVM chain pays a few
-thousand gas per event and loses nothing else.
+One table per art style, sized to what the style genuinely varies — six rows for
+creature, five for the other two, because a fixed-size table would have had to invent
+rows that mean nothing:
+
+| Style | Rows |
+| --- | --- |
+| `creature` (0) | `background`, `body`, `pattern`, `eyes`, `mouth`, `accessory` |
+| `mosaic` (1) | `background`, `primary`, `accent`, `tile`, `density` |
+| `horizon` (2) | `sky`, `sun`, `ground`, `star`, `cloud` |
+
+Colour rows are one of twelve named hue bands: `red`, `orange`, `yellow`, `chartreuse`,
+`green`, `spring`, `cyan`, `azure`, `blue`, `violet`, `magenta`, `rose`. Each other row
+is its axis's own vocabulary, and a value outside a table reads as the empty string
+rather than as a neighbouring word it was never given:
+
+| Row | Values |
+| --- | --- |
+| `pattern` | `plain`, `striped`, `dotted` |
+| `eyes` | `round`, `wide`, `narrow`, `bright` |
+| `mouth` | `thin`, `small`, `wide`, `open` |
+| `accessory` | `none`, `antenna`, `horns`, `ears` |
+| `tile` | `fine`, `banded`, `coarse`, `blocky` |
+| `density` | `dense`, `balanced`, `airy` |
+| `star` | `few`, `some`, `many` |
+| `cloud` | `none`, `wisp`, `drift`, `bank` |
+
+The same rows appear in the ERC-8004 document as `attributes`, in words, `style` first:
+
+```json
+"attributes": [
+  { "trait_type": "style", "value": "creature" },
+  { "trait_type": "background", "value": "azure" },
+  { "trait_type": "eyes", "value": "narrow" }
+]
+```
+
+None of it is decoration: `tile` and `density` really coarsen the mosaic sampling,
+`star` and `cloud` really scatter the sky and lay the cloud band, and `eyes` and `mouth`
+really change the creature's face. A row that stopped describing the pixels would fail
+the collection's own tests.
 
 ## GET /collections/artifact
 
@@ -225,8 +260,8 @@ Free, `GET` or `HEAD`, `Cache-Control: public, max-age=300`, CORS `*`.
 | `compiler.settings` | `{ optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: "paris" }` |
 | `abi` | Full ABI, including the constructor |
 | `constructorInputs` | Constructor parameter list (what `prepare` encodes against) |
-| `creationBytecode` | `0x…` — 24,195 bytes of deploy code |
-| `deployedBytecodeSize` | `21021` — runtime under the 24,576-byte code-size limit |
+| `creationBytecode` | `0x…` — 26,482 bytes of deploy code |
+| `deployedBytecodeSize` | `23287` — runtime under the 24,576-byte code-size limit |
 
 Status: `200` · `405` (other methods) · `503` `{ error: "Collection artifact not built" }`
 when the artifact has not been built.
@@ -321,5 +356,5 @@ was passed.
 | Royalty | 0–10000 bps, receiver required above 0 |
 | `mintPrice` | < 1,000,000 ETH (sanity ceiling) |
 | Art styles | 0, 1, 2 |
-| Creation code | 24,195 bytes (≈48 KB hex) |
-| Runtime code | 21,021 bytes / 24,576 limit |
+| Creation code | 26,482 bytes (≈53 KB hex) |
+| Runtime code | 23,287 bytes / 24,576 limit |
