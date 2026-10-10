@@ -1,7 +1,7 @@
 # SignalCollection: the contract and the two endpoints
 
 Everything the skill compresses, in full: the constructor, every function, every error,
-the art modes, the agent registration every token carries, and the exact request/response
+the art modes, the agent document every token carries, and the exact request/response
 shapes of `GET /collections/artifact` and `POST /collections/prepare`.
 
 The contract is one flat Solidity file with **no imports**. Published source, ABI and
@@ -28,13 +28,13 @@ this table is what the encoded bytes mean.
 | 10 | `royaltyBps` | `uint96` | 0–10000 (10000 = 100%). `0` disables royalties |
 | 11 | `artStyle` | `uint8` | `0` creature, `1` mosaic, `2` horizon — only used when `baseURI` is empty |
 | 12 | `artSeed` | `uint256` | Seed for the on-chain render; prepare derives one from the name when absent |
-| 13 | `description` | `string` | The `description` in every token's agent registration; empty ⇒ contract writes `An AI agent in the <name> collection.`. No `"`, `\` or control characters |
+| 13 | `description` | `string` | The `description` in every token's agent document; empty ⇒ contract writes `An AI agent in the <name> collection.`. No `"`, `\` or control characters |
 | 14 | `agentBaseURI` | `string` | Where each token's agent is served: endpoint = `<agentBaseURI><id>`. Empty ⇒ `"services": []`. No `"`, `\` or control characters |
 
 Reverts at construction: `ZeroSupply`, `ZeroWalletCap`, `CreatorCapAboveSupply`,
 `UnknownArtStyle`, `InvalidRoyalty` (bps > 10000, or bps > 0 with a zero receiver),
 `InvalidMetadataString` (a name, description or agent base URI that would break the
-registration JSON).
+metadata JSON).
 
 The constructor is **not payable** — it takes no value, so the creation transaction
 carries only gas.
@@ -51,7 +51,7 @@ No transaction needed; an agent can phrase any of these as "Read `f()` on `<addr
 | `uint8` | `artStyle()` |
 | `uint96` | `royaltyBps()` |
 | `bool` | `mintPaused()` |
-| `string` | `tokenURI(uint256)` — hosted `…/<id>.json`, or the on-chain registration `data:application/json;base64,…` |
+| `string` | `tokenURI(uint256)` — hosted `…/<id>.json`, or the on-chain metadata `data:application/json;base64,…` |
 | `bytes` | `metadata(uint256 tokenId, string key)` — the ERC-8048 agent profile; empty bytes (`0x`) when unset, never reverts |
 | `string[], uint8[]` | `traits(uint256 tokenId)` — the trait names and their numeric values for one token; reverts `ERC721NonexistentToken` for an id that was never minted |
 | `address, uint256` | `royaltyInfo(uint256 tokenId, uint256 salePrice)` |
@@ -68,7 +68,7 @@ No transaction needed; an agent can phrase any of these as "Read `f()` on `<addr
 | `setBaseURI(uri)` | owner | — | Switches `tokenURI` to hosted mode — this is the reveal |
 | `setContractURI(uri)` | owner | — | Collection metadata |
 | `setAgentBaseURI(uri)` | owner | — | Repoints every token's RESTAP endpoint to `<uri><id>`; `InvalidMetadataString` if the URI would break the JSON. Empty string drops the `services` entry |
-| `setAgentDescription(text)` | owner | — | Rewrites every token's registration `description`; `InvalidMetadataString` on `"`, `\` or control characters |
+| `setAgentDescription(text)` | owner | — | Rewrites every token's document `description`; `InvalidMetadataString` on `"`, `\` or control characters |
 | `setMintPrice(wei)` | owner | — | Reprice; caps never change |
 | `setMintPaused(bool)` | owner | — | Halt/resume the public mint |
 | `setRoyalty(receiver, bps)` | owner | — | EIP-2981 default royalty; `bps = 0` turns it off |
@@ -116,12 +116,12 @@ reentrant receiver sees the caps it just spent.
 
 **Hosted (constructor `baseURI` non-empty).**
 `tokenURI(id) = baseURI + id + ".json"` — files must be `1.json`, `2.json`, … under the
-base URL, and each file must be the registration document below, because that is what is
+base URL, and each file must be the document below, because that is what is
 fetched from the URL. Any `http`, `https` or `ipfs` base works. `setBaseURI` switches a
 live contract into (or out of) hosted mode, which is how a reveal is done.
 
 **On-chain (`baseURI` empty).** The contract renders a 16×16 mirrored pixel image and
-wraps it in the token's registration document (below); the image is the `image` field,
+wraps it in the token's document (below); the image is the `image` field,
 still a `data:image/svg+xml;base64,…` URI. Traits come from `keccak256(artSeed, tokenId)`,
 so a token always renders the same bytes. Colour is computed as integer HSL — identical
 on every chain and compiler patch level.
@@ -135,25 +135,34 @@ on every chain and compiler patch level.
 Mirroring: a cell's colour depends only on its distance from the vertical axis, so both
 halves are always identical.
 
-## The agent registration (ERC-8004 + RESTAP)
+## The agent document (ERC-721 metadata + RESTAP)
 
 In on-chain mode `tokenURI(id)` is `data:application/json;base64,<document>`, and the
-document is the contract's own ERC-8004 registration:
+document is the contract's own ERC-721 metadata, carrying the token's service entry:
 
 ```json
 {
-  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "Nova Nodes #7",
   "description": "Nova Nodes — agent NFT collection.",
-  "image": "data:image/svg+xml;base64,…",
   "attributes": [{ "trait_type": "style", "value": "creature" }],
+  "image": "data:image/svg+xml;base64,…",
   "services": [
     { "name": "RESTAP", "endpoint": "https://agents.example.com/nova/7", "version": "0.1.4-beta" }
   ]
 }
 ```
 
+- The document carries **no ERC-8004 `type` field**, and that is deliberate. A marketplace
+  that sees `#registration-v1` treats the token as an agent registration and renders that
+  document's own `active` / `x402Support` flags *in place of* `attributes`, so the traits
+  are read but never listed. Observed directly on a marketplace that indexes both shapes:
+  the `registration-v1` collection showed only `Active` and `x402 Support`, while a
+  collection serving plain ERC-721 metadata with an identical agent layer showed all of
+  its art traits. The agent layer is the ERC-8048 profile below, which is read straight
+  from the contract instead of inferred from this document.
 - `name` is `<collection name> #<id>`; `attributes[0]` carries the art style by name.
+- `attributes` is written **before** `image`, so a reader that caps how much of a
+  response it parses still reaches the traits — the SVG data URI is the largest field.
 - `services` is `[{ name: "RESTAP", endpoint: "<agentBaseURI><id>", version: "0.1.4-beta" }]`
   when an `agentBaseURI` was set, and `[]` otherwise — an endpoint is only ever claimed
   when one exists. RESTAP clients append `/.well-known/restap.json`, `POST /talk` and
@@ -165,7 +174,7 @@ document is the contract's own ERC-8004 registration:
 
 ## The agent profile (ERC-8048 / ERC-721T)
 
-The registration document is what a marketplace fetches; the profile is what a contract
+The metadata document is what a marketplace fetches; the profile is what a contract
 reader sees with no HTTP call. The contract implements [ERC-8048](https://eips.ethereum.org/EIPS/eip-8048)
 as [ERC-721T](https://github.com/nxt3d/721t) spells it out: interface id `0xdf670be1`,
 `metadata(tokenId, key) → bytes`, and a `MetadataSet` event carrying both the raw and the
@@ -197,7 +206,7 @@ or viem/ethers `readContract` with the same signature. The value is bytes — de
 
 ## Traits
 
-`traits(id)` and the registration's `attributes` answer from the same hash, so the words a
+`traits(id)` and the document's `attributes` answer from the same hash, so the words a
 marketplace shows and the pixels the contract draws cannot drift apart.
 
 ```ts
@@ -260,8 +269,8 @@ Free, `GET` or `HEAD`, `Cache-Control: public, max-age=300`, CORS `*`.
 | `compiler.settings` | `{ optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: "paris" }` |
 | `abi` | Full ABI, including the constructor |
 | `constructorInputs` | Constructor parameter list (what `prepare` encodes against) |
-| `creationBytecode` | `0x…` — 26,482 bytes of deploy code |
-| `deployedBytecodeSize` | `23287` — runtime under the 24,576-byte code-size limit |
+| `creationBytecode` | `0x…` — 26,403 bytes of deploy code |
+| `deployedBytecodeSize` | `23208` — runtime under the 24,576-byte code-size limit |
 
 Status: `200` · `405` (other methods) · `503` `{ error: "Collection artifact not built" }`
 when the artifact has not been built.
@@ -356,5 +365,5 @@ was passed.
 | Royalty | 0–10000 bps, receiver required above 0 |
 | `mintPrice` | < 1,000,000 ETH (sanity ceiling) |
 | Art styles | 0, 1, 2 |
-| Creation code | 26,482 bytes (≈53 KB hex) |
-| Runtime code | 23,287 bytes / 24,576 limit |
+| Creation code | 26,403 bytes (≈53 KB hex) |
+| Runtime code | 23,208 bytes / 24,576 limit |
