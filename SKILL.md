@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.13.0
+version: 2.14.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -482,8 +482,9 @@ chain's ERC-8217 adapter:
 
 `register(0, collection, tokenId, agentURI)`
 
-`0` means ERC-721. `agentURI` is a URL you actually serve for that token. Do not point
-it at `tokenURI`, and do not add an ERC-8004 `type` field to the metadata document —
+`0` means ERC-721. `agentURI` is the assigned agent's registration JSON
+(`/.well-known/agents/<id>.json`). Do not point it at the HTML profile page, at
+`tokenURI`, and do not add an ERC-8004 `type` field to the metadata document —
 that hides the art traits.
 
 Prepare returns `binding`. When `binding.available` is false, this chain has no
