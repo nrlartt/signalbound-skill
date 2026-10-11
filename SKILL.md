@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.12.0
+version: 2.13.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -34,11 +34,15 @@ compiled contract, and you describe the collection and sign the deploy it hands 
 Every token is also an agent NFT: ERC-721 metadata carrying an optional RESTAP service
 entry, plus an ERC-8048 (ERC-721T) agent profile readable straight from the
 contract, so the collection deploys ready for agents to reach and for indexers to read.
-Prepare assigns one Signalbound agent, token id 1 through 6666, from the collection
-name. Do not pass `deployerAgentId` and do not ask the user for one. Every on-chain
-token then carries that agent as the `Signalbound Agent` trait. OpenSea's Onchain
-agent binding panel is a separate transaction, `binding.calls`, and it exists only
-on chains whose prepare reply has `binding.available` true.
+Prepare assigns one bound Signalbound agent. The collection supply is 6,666, and
+most of those tokens are not agents that can act. The assignment is taken from the
+bound agents only: the tokens whose ERC-8217 identity they control. Do not pass `deployerAgentId`
+and do not ask the user for one. Read `params.deployerAgentId`
+and `params.deployerAgentPool` from this response and deploy that exact
+`deployData`. Every on-chain token then carries that agent as the `Signalbound Agent`
+trait. OpenSea's Onchain agent binding panel is a separate transaction,
+`binding.calls`, and it exists only on chains whose prepare reply has
+`binding.available` true.
 
 This file is canonical at `https://signalbound.art/skill.md`. A copy in the source
 repository is a mirror; load the URL.
@@ -90,7 +94,7 @@ back to you before you sign.
 | `artSeed` | on-chain art seed; derived from the name when omitted, so the same request always renders the same art |
 | `description` | optional; what every token's agent document says, see *Agent NFTs* |
 | `agentBaseURI` | optional; where each token's agent is served, see *Agent NFTs* |
-| `deployerAgentId` | not an input. Prepare assigns a Signalbound agent from the collection name and writes trait `Signalbound Agent` on every on-chain token. Do not pass it. This trait is not the OpenSea binding panel |
+| `deployerAgentId` | not an input. Prepare assigns a bound Signalbound agent and writes trait `Signalbound Agent` on every on-chain token. Do not pass it. A token from the 6,666 supply that is not bound is never used. This trait is not the OpenSea binding panel |
 | `chainId` | not a constructor argument — prepare echoes it so you deploy on the right chain |
 
 **Ownership is a constructor argument on purpose.** An agent deploying through a factory
@@ -462,9 +466,11 @@ marketplace-ready `attributes`, from the same hash, so the two cannot disagree.
   draws. A trait that stopped describing the pixels would fail the collection's own
   tests.
 - **`Signalbound Agent`** is not a roll and not a row of `traits(id)`. Prepare assigns
-  one Signalbound agent, a token id from 1 to 6666 derived from the collection name,
-  and every on-chain token lists that same id. The same name always assigns the same
-  agent, so preparing twice does not change the collection. Do not pass
+  one bound Signalbound agent, and every on-chain token lists that same id. Bound
+  means the token controls an ERC-8217 identity and can act. The 6,666 supply is not the pool.
+  `params.deployerAgentPool` is how many bound agents were eligible when
+  this response was built. Deploy the `deployData` from that same response: a later
+  prepare can choose a different agent if the bound set has changed. Do not pass
   `deployerAgentId`. Hosted mode does not write attributes in the contract: put the
   same trait in each JSON file yourself. Read the id back with `deployerAgentId()`.
 
@@ -534,7 +540,8 @@ sign. A mismatch stops the deploy — do not repair a field by editing `deployDa
 | `params.art.mode` | `onchain` or `metadata` |
 | `params.art.styleName`, `params.art.formName` | the world and the silhouette you already named. `formName` is null for mosaic, horizon and hosted art |
 | `params.description`, `params.agent.endpoint` | the document. `endpoint` is `<agentBaseURI><id>`, or null when no base was passed |
-| `params.deployerAgentId` | the Signalbound agent prepare assigned, 1–6666. You did not choose it |
+| `params.deployerAgentId` | the bound Signalbound agent prepare assigned. You did not choose it. It is a member of the bound set, not an arbitrary token from the 6,666 supply |
+| `params.deployerAgentPool` | how many bound agents were eligible for that assignment |
 | `binding.available` | true only when this chain has an ERC-8217 adapter. After the mint, `binding.calls` are the register transactions. Do not invent an adapter when it is false |
 | `verify` | the explorer fields, passed on unchanged |
 
@@ -664,7 +671,7 @@ Deploying on a chain the user did not name is a bug: ask, or follow what they sa
 | Name / symbol | 64 characters / 1–16 letters and digits |
 | `description` | 512 characters; no `"`, `\` or control characters — it is written into JSON |
 | `agentBaseURI` | optional http/https/ipfs URL; trailing slash appended by prepare |
-| `deployerAgentId` | assigned by prepare, 1–6666; do not send it |
+| `deployerAgentId` | assigned by prepare from the bound agents; do not send it |
 | `bindCount` | 1–20, only on the second prepare, with `collection` |
 | `maxSupply` | 1–1,000,000 |
 | `maxMintPerWallet` | 1–`maxSupply`, cumulative |
