@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.7.0
+version: 2.8.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -122,11 +122,18 @@ The contract paints every token from a sheet of parts. It does not know what a f
 a lighthouse or a bird is. You do. A mint does not store an SVG, so a supply of 1000
 is that subject all the way through.
 
-You decide the parts that make *this* subject recognizable, then vary at least two of
-them. A fox is ears, a snout and a tail. A lighthouse is a tower, a lamp and a beam.
-A bird is a beak, a wing and feet. Do not reuse a sheet whose parts belong to a
-different thing, and do not send `subject:"rabbit"` because a rabbit sheet already
-exists and the user said fox.
+You decide the parts that make *this* subject recognizable. A sideways animal needs a
+scene behind it, a body, feet, a head, eyes, and one worn or held part. A building
+needs a ground, a mass, an opening, and a top. Vary at least four of those parts.
+Do not reuse a sheet whose parts belong to a different thing, and do not send
+`subject:"rabbit"` because a rabbit sheet already exists and the user said fox.
+
+The sheet is refused when it is too thin to be a collection. `cast.canvas` is 32.
+The first part is the background, and each of its variants is a scene: sky, ground,
+and at least one prop — a single full-canvas rectangle is not a background. At least
+six parts, at least four of them with two or more variants, and at least 40
+rectangles across the sheet. A `400` with `field:"cast"` names which of those is
+missing. Fix the drawing. Do not switch the subject to one that already has a sheet.
 
 `bird`, `rabbit` and `robot` already have sheets, so a name alone is enough:
 
@@ -136,10 +143,10 @@ curl -s -X POST https://api.signalbound.art/collections/prepare \
   -d '{"name":"Bankr Birds","owner":"0xTHE_DEPLOYER_WALLET","chainId":4663,"maxSupply":1000,"mintPriceEth":"0","subject":"bird"}'
 ```
 
-Any other subject needs the sheet you just drew. `cast.canvas` is 32. `palette` is
-`#rrggbb`. Each rect is `[x, y, width, height, colorIndex]`. One to eight parts,
-one to eight variants each, and the names are letters, digits, spaces or hyphens.
-This is the shape, not a fish you paste into a castle collection:
+Any other subject needs the sheet you just drew. `palette` entries are `#rrggbb`.
+Each rect is `[x, y, width, height, colorIndex]`. Names are letters, digits, spaces
+or hyphens, at most eight parts and eight variants. This is the shape of one part,
+not a drawing you paste in for a different subject:
 
 ```json
 {
@@ -173,8 +180,9 @@ Say the subject and the part names before you sign. `params.art.mode` must be `c
 `artForm` is not the picture here — a round silhouette with the description
 "birds" is the failure this field exists to stop. After the deploy, read
 `subject()` and `traits(1)` and say the part names. A `400` with `field:"cast"`
-means the sheet was missing or a rect fell outside the canvas; fix that sheet.
-Do not clear it by switching the subject to one that already has a sheet.
+means the sheet is missing, too thin, or a rect falls outside the canvas. The
+sample below is the shape of the fields, and sending it alone is refused. Fix the
+drawing. Do not clear the error by switching the subject to one that already has a sheet.
 
 ### 1. Art you draw, stored on-chain (`mintWithArt`)
 
@@ -496,7 +504,17 @@ constructor is not payable; gas comes from the deployer's wallet). Three ways to
 - **A chain CLI:** `cast create --create --data <deployData>`, or `forge create` against
   the source in the artifact.
 
-**Step 3 — read it back.** `owner()`, `name()`, `symbol()`, `totalSupply()`,
+**Step 3 — mint the creator reserve.** The deploy does not mint. A collection with
+`totalSupply() == 0` has no tokens, so a marketplace grid stays empty. Prepare's
+`mint.creator` is the next transaction: send `mint.creator.data` **to the deployed
+address**, with `value` `0`. It calls `mintToCreator` for up to 20 of the reserve.
+If `maxCreatorMints` is larger, send it again until `creatorMinted()` matches. If
+`mint.creator` is null, the reserve is zero and only a public `mint` can create
+tokens. A public mint sends `mint.public.data` to the same address with
+`mint.public.valueWei` attached for one token — any other value reverts
+`WrongPayment`. Do not attach that value to the deploy. The deploy stays valueless.
+
+**Step 4 — read it back.** `owner()`, `name()`, `symbol()`, `totalSupply()`,
 `maxSupply()`, `mintPrice()`, `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()`,
 `agentBaseURI()`, `agentDescription()`, `artStyle()`, `artForm()`. Confirm the owner is the user's
 wallet and the rules match the request — including the silhouette, because `artForm()`
@@ -505,9 +523,11 @@ the only proof the deploy happened — an HTTP `200` is not. For an agent collec
 read `metadata(1, "endpoint[restap]")`: it is the endpoint the tokens advertise, and it
 is empty if no `agentBaseURI` was ever set.
 
-**Step 4 — report.** The address, the explorer link, verification status, and the mint
-instruction: price per mint, supply, per-wallet cap, creator reserve. If tokens point at
-an agent, say where — token `1`'s endpoint, from `params.agent.endpoint`.
+**Step 5 — report.** The address, the explorer link, verification status, `totalSupply()`,
+and the public mint: price per token, supply, per-wallet cap, creator reserve already
+minted. If `totalSupply()` is still 0, say the mint did not happen and quote the
+revert. Do not describe an empty collection as minted. If tokens point at an agent,
+say where — token `1`'s endpoint, from `params.agent.endpoint`.
 
 ## Verifying the contract
 
