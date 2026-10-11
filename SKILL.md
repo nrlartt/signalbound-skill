@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.8.0
+version: 2.9.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -536,18 +536,17 @@ block explorer asks for:
 
 | Field | Where it comes from |
 | --- | --- |
-| Contract name | `contract` in the prepare reply. "Bankr Birds" verifies as `BankrBirds`. Paste `verify.source`, not the generic artifact source, or the explorer shows `SignalCollection` |
-| Source | `verify.source` — the same single file, with the contract identifier set to that name. No imports |
+| Contract name | `SignalCollection`. This is the Solidity contract. The collection title is `name()`, not this identifier. Do not verify the source under any other contract name |
+| Source | `source` in `GET /collections/artifact` — the complete file, no imports to reconstruct |
 | Compiler version | `verify.compiler`, e.g. `0.8.26+commit.8a97fa7a` |
 | Optimization | `verify.optimizerRuns` — `200`, enabled |
 | EVM version | `verify.evmVersion` — `paris`; do not accept a tool's "default" |
-| Bytecode hash | `verify.bytecodeHash` — `none`. A default hash will not match |
 | Constructor arguments | `verify.constructorArgs` — already ABI-encoded, paste as hex |
 
-With Bankr: "Verify contract <address> on <chain> as <contract> with this source, compiler …, optimizer
-runs 200, EVM version paris, bytecode hash none, constructor args …". On an explorer form: single-file
-Solidity, the contract name from `contract`, paste `verify.source`, pick the version, optimization yes / runs 200, EVM version
-paris, bytecode hash none, paste the constructor arguments. Re-verification with different settings fails
+With Bankr: "Verify contract <address> on <chain> as SignalCollection with this source, compiler …, optimizer
+runs 200, EVM version paris, constructor args …". On an explorer form: single-file
+Solidity, contract name `SignalCollection`, paste the artifact source, pick the version, optimization yes / runs 200, EVM version
+paris, paste the constructor arguments. Do not rename the contract in the source, and do not reuse another collection's verified source. Re-verification with different settings fails
 loudly — re-read `verify`, do not guess.
 
 If verification is refused, the deploy is still live and still owned by the user: report
