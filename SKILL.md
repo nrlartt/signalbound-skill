@@ -9,7 +9,11 @@ description: |
   profile readable on-chain, and every token publishes the traits its art
   was drawn from. Use when a user asks to create or launch an NFT collection, verify a
   deployed contract, mint from a collection, or read what a collection contract says.
-version: 2.2.0
+  When the user names a subject — whatever the noun is — build a character cast for
+  that subject and pass `subject` plus `cast`, so every token is painted from it.
+  The built-in silhouette is not that subject. bird, rabbit and robot already have
+  sheets; any other noun needs the cast you draw.
+version: 2.7.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -52,6 +56,8 @@ endpoint for collections does not exist.
 | "…and verify the contract you deploy" | *Verifying the contract* — never skip it |
 | "each token should be an agent, we host them at …" | *Agent NFTs* — pass `agentBaseURI` |
 | "mint 5 from my collection" / "what's the supply so far" | *Minting and reading* |
+| "a collection of birds / foxes / lighthouses / whatever they named" | *Character cast* — draw that subject. Do not pick a silhouette and call it the thing they asked for |
+| "a set of rabbits, each one different" / "draw the whole supply" | *Drawing a series* — the card first; `maxCreatorMints` equals the number you will draw |
 | "the art isn't ready yet, add it later" | Deploy now (on-chain art), then `setBaseURI` for the reveal |
 | "change the mint price / pause minting" | owner setters in *Minting and reading* |
 | "deploy on Robinhood / Base / Ethereum" | look the chain up in *Chains*, pass `chainId` to prepare |
@@ -106,13 +112,74 @@ The sale itself:
 The user's art description decides which mode you use — and if you cannot produce the
 art, say so instead of inventing a URL.
 
-There are three ways a token can end up with artwork. **When the request names a subject,
-you use the first one.** The other two are what you fall back to.
+There are four ways a token can end up with artwork. **When the request names a subject,
+you cast that subject.** The other ways are a single stored drawing, hosted files, and
+the silhouette. The silhouette is not a stand-in for a noun.
+
+### 0. Character cast (`subject` + `cast`)
+
+The contract paints every token from a sheet of parts. It does not know what a fox,
+a lighthouse or a bird is. You do. A mint does not store an SVG, so a supply of 1000
+is that subject all the way through.
+
+You decide the parts that make *this* subject recognizable, then vary at least two of
+them. A fox is ears, a snout and a tail. A lighthouse is a tower, a lamp and a beam.
+A bird is a beak, a wing and feet. Do not reuse a sheet whose parts belong to a
+different thing, and do not send `subject:"rabbit"` because a rabbit sheet already
+exists and the user said fox.
+
+`bird`, `rabbit` and `robot` already have sheets, so a name alone is enough:
+
+```bash
+curl -s -X POST https://api.signalbound.art/collections/prepare \
+  -H 'content-type: application/json' \
+  -d '{"name":"Bankr Birds","owner":"0xTHE_DEPLOYER_WALLET","chainId":4663,"maxSupply":1000,"mintPriceEth":"0","subject":"bird"}'
+```
+
+Any other subject needs the sheet you just drew. `cast.canvas` is 32. `palette` is
+`#rrggbb`. Each rect is `[x, y, width, height, colorIndex]`. One to eight parts,
+one to eight variants each, and the names are letters, digits, spaces or hyphens.
+This is the shape, not a fish you paste into a castle collection:
+
+```json
+{
+  "subject": "fish",
+  "cast": {
+    "canvas": 32,
+    "palette": ["#12151c", "#3aa8b0", "#141414"],
+    "layers": [
+      {"name": "Background", "variants": [
+        {"name": "Night", "rects": [[0, 0, 32, 32, 0]]},
+        {"name": "Sea", "rects": [[0, 0, 32, 32, 1]]}
+      ]},
+      {"name": "Body", "variants": [
+        {"name": "Slim", "rects": [[8, 14, 14, 6, 1], [20, 15, 6, 3, 1]]},
+        {"name": "Round", "rects": [[8, 12, 12, 8, 1]]}
+      ]},
+      {"name": "Tail", "variants": [
+        {"name": "Fork", "rects": [[4, 13, 5, 2, 1], [4, 19, 5, 2, 1]]},
+        {"name": "Fan", "rects": [[4, 14, 5, 6, 1]]}
+      ]},
+      {"name": "Eye", "variants": [
+        {"name": "Dot", "rects": [[20, 15, 2, 2, 2]]}
+      ]}
+    ]
+  }
+}
+```
+
+Say the subject and the part names before you sign. `params.art.mode` must be `cast`,
+`params.art.subject` the noun they used, and `params.art.parts` the parts you drew.
+`artForm` is not the picture here — a round silhouette with the description
+"birds" is the failure this field exists to stop. After the deploy, read
+`subject()` and `traits(1)` and say the part names. A `400` with `field:"cast"`
+means the sheet was missing or a rect fell outside the canvas; fix that sheet.
+Do not clear it by switching the subject to one that already has a sheet.
 
 ### 1. Art you draw, stored on-chain (`mintWithArt`)
 
-This is the answer to "deploy a collection of rabbits" — the pixels come back as rabbits,
-because you drew them and the chain kept them.
+This is one stored drawing on one token. A whole supply of a named subject is a cast,
+above. Reach for this when a single token needs a picture the cast does not cover.
 
 ```
 mintWithArt(address to, bytes svg) → uint256 tokenId      // onlyOwner, creator reserve rules
@@ -142,6 +209,68 @@ public sale. Any token you do not draw falls back to the built-in render, so set
 
 The holder can redraw later with `setMetadata(id, "image", svg)`; the art is an ordinary
 profile value, not something frozen at mint.
+
+#### Drawing a series
+
+`mintWithArt` stores the bytes you pass. Those bytes are one collection only when they
+follow one grammar. Fill this card and show it before the first signature:
+
+```
+Series
+- subject:
+- drawn count:          (this is maxCreatorMints; one transaction each)
+- whole supply:         the set | hosted files | reserve only, public mint is the silhouette
+- canvas:               24×24 rects
+- palette:              ground / body / marking / eye / accent
+- fixed:
+- varies:               (two axes — or say it is a recolor)
+- bytes of token 1:
+```
+
+The whole-supply line is the decision. Drawing 20 rabbits inside a supply of 2222 does not make a rabbit collection: a public `mint` still receives the built-in silhouette.
+Three honest shapes:
+
+- **The set is the subject.** `maxSupply` equals the number you will draw,
+  `maxCreatorMints` equals that number, and you `mintWithArt` every id. Nothing is left
+  for the silhouette.
+- **The files exist.** Pass `baseURI` and ship `<id>.json` for every id. Do not also
+  claim the contract drew them.
+- **Only the reserve is drawn.** Say that, name the `artForm` the public mint will show,
+  and do not call the collection the subject.
+
+Every token:
+
+- `viewBox="0 0 24 24"`, `xmlns="http://www.w3.org/2000/svg"`, `shape-rendering="crispEdges"`.
+- Elements are `svg`, `g` and `rect` only. Integer `x`, `y`, `width`, `height`. No
+  `path`, `circle`, `image`, `text`, `filter`, gradient or `url(`.
+- Five named fills. The first child is the ground, `<rect width="24" height="24"/>`,
+  and that ground is the same on every token.
+- The subject sits in the same footprint every time, about x 6–18 and y 2–20, so a
+  grid of them aligns.
+- Two axes change between tokens. If only the colours change, the card says recolor.
+
+Copy the construction, not the animal. This one is a rabbit. A robot collection does
+not paste it.
+
+Five fills in this one: ground `#1c2430`, body `#f3efe6`, marking `#e7a8ad`, eye `#12151c`, accent `#d8c7a2`.
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" shape-rendering="crispEdges"><rect width="24" height="24" fill="#1c2430"/><rect x="8" y="1" width="2" height="8" fill="#f3efe6"/><rect x="14" y="1" width="2" height="8" fill="#f3efe6"/><rect x="9" y="3" width="1" height="4" fill="#e7a8ad"/><rect x="14" y="3" width="1" height="4" fill="#e7a8ad"/><rect x="8" y="8" width="8" height="1" fill="#f3efe6"/><rect x="7" y="9" width="10" height="1" fill="#f3efe6"/><rect x="6" y="10" width="12" height="5" fill="#f3efe6"/><rect x="7" y="15" width="10" height="1" fill="#f3efe6"/><rect x="8" y="16" width="8" height="3" fill="#f3efe6"/><rect x="7" y="19" width="3" height="3" fill="#f3efe6"/><rect x="14" y="19" width="3" height="3" fill="#f3efe6"/><rect x="16" y="16" width="2" height="2" fill="#d8c7a2"/><rect x="9" y="12" width="2" height="2" fill="#12151c"/><rect x="13" y="12" width="2" height="2" fill="#12151c"/><rect x="11" y="14" width="2" height="1" fill="#e7a8ad"/></svg>
+```
+
+Same ground, same body, same eye line. The next token lengthens both ears (`y="0"` `height="9"`). The one after adds a belly mark (`<rect x="10" y="16" width="4" height="2" fill="#e7a8ad"/>`). A later token that switches to circles is a different collection; do not mint it into this one.
+
+| Subject | Stays | Varies |
+| --- | --- | --- |
+| rabbit, hare | two ears, head, body, feet | ear length; belly mark |
+| bird, owl | beak, body, wing, tail | beak length; wing height |
+| robot, mech | block head, body, two eyes | antenna; chest panel |
+| ghost, slime | rounded cap, flat foot | eye gap; mouth |
+| crystal, gem | diamond body | facet offset; spark |
+
+Count the UTF-8 length of token 1. Say that length, the storage note above, and the
+drawn count, before the first `mintWithArt`. If the subject cannot be drawn with rects
+on this canvas, say so and use the silhouette table. Do not invent a URL to get past it.
 
 ### 2. Hosted metadata (`baseURI` given)
 
@@ -334,11 +463,23 @@ curl -s -X POST https://api.signalbound.art/collections/prepare \
   }'
 ```
 
-The reply carries `creationBytecode` (the compiled contract), `constructorArgs`
-(ABI-encoded, ready), `deployData` (bytecode + arguments for a raw creation transaction),
-`params` (every value echoed — the `description` and the `agent` endpoint among them —
-read it and check it against what the user asked for), `chainId`, and `verify` (the exact
-compiler settings). `POST` only; a missing field answers `400` naming the field.
+`POST` only; a missing field answers `400` naming the field. Read the reply before you
+sign. A mismatch stops the deploy — do not repair a field by editing `deployData`.
+
+| Field | Must match |
+| --- | --- |
+| `chainId` | the chain the user named |
+| `deployData` | the creation transaction's `data`. No `to`, no value. Do not rebuild it from parts |
+| `params.name`, `params.symbol` | the collection |
+| `params.owner` | the user's wallet. `null` means `owner` was omitted; read `ownerNote` and stop when a factory would otherwise own it |
+| `params.maxSupply`, `params.mintPrice.eth`, `params.maxMintPerWallet`, `params.maxCreatorMints` | the sale. `maxCreatorMints` is how many tokens you can still draw |
+| `params.art.mode` | `onchain` or `metadata` |
+| `params.art.styleName`, `params.art.formName` | the world and the silhouette you already named. `formName` is null for mosaic, horizon and hosted art |
+| `params.description`, `params.agent.endpoint` | the document. `endpoint` is `<agentBaseURI><id>`, or null when no base was passed |
+| `verify` | the explorer fields, passed on unchanged |
+
+`creationBytecode` and `constructorArgs` are that same deploy split apart, for a tool
+that asks for them separately. `params.art` is the echo of the card, not a new decision.
 
 **Step 2 — deploy.** A creation transaction has **no `to`** and **no value** (the
 constructor is not payable; gas comes from the deployer's wallet). Three ways to send it:
@@ -375,16 +516,18 @@ block explorer asks for:
 
 | Field | Where it comes from |
 | --- | --- |
-| Source | `source` in `GET /collections/artifact` — the complete file, no imports to reconstruct |
+| Contract name | `contract` in the prepare reply. "Bankr Birds" verifies as `BankrBirds`. Paste `verify.source`, not the generic artifact source, or the explorer shows `SignalCollection` |
+| Source | `verify.source` — the same single file, with the contract identifier set to that name. No imports |
 | Compiler version | `verify.compiler`, e.g. `0.8.26+commit.8a97fa7a` |
 | Optimization | `verify.optimizerRuns` — `200`, enabled |
 | EVM version | `verify.evmVersion` — `paris`; do not accept a tool's "default" |
+| Bytecode hash | `verify.bytecodeHash` — `none`. A default hash will not match |
 | Constructor arguments | `verify.constructorArgs` — already ABI-encoded, paste as hex |
 
-With Bankr: "Verify contract <address> on <chain> with this source, compiler …, optimizer
-runs 200, EVM version paris, constructor args …". On an explorer form: single-file
-Solidity, paste the source, pick the version, optimization yes / runs 200, EVM version
-paris, paste the constructor arguments. Re-verification with different settings fails
+With Bankr: "Verify contract <address> on <chain> as <contract> with this source, compiler …, optimizer
+runs 200, EVM version paris, bytecode hash none, constructor args …". On an explorer form: single-file
+Solidity, the contract name from `contract`, paste `verify.source`, pick the version, optimization yes / runs 200, EVM version
+paris, bytecode hash none, paste the constructor arguments. Re-verification with different settings fails
 loudly — re-read `verify`, do not guess.
 
 If verification is refused, the deploy is still live and still owned by the user: report
@@ -448,7 +591,7 @@ Deploying on a chain the user did not name is a bug: ask, or follow what they sa
 | `mintPrice` | below 1,000,000 ETH (sanity check) |
 | Art styles | 0 creature, 1 mosaic, 2 horizon |
 | Art forms | 0 blob, 1 round, 2 square, 3 tall, 4 diamond, 5 arch — creature only, ignored otherwise |
-| Deploy bytecode | 27.0 KB creation, 23.7 KB runtime — under the 24 KB code-size limit |
+| Deploy bytecode | under the 24 KB runtime limit; read `deployedBytecodeSize` from the artifact rather than guessing |
 | Prepare | `POST`, free, no key; `400` names the offending field |
 
 ## Prompt examples
@@ -462,13 +605,15 @@ The ask this skill exists for, in one message:
 > https://signalbound.art/skill.md — Make sure to verify the contract you deploy as well
 
 What that becomes: prepare with `{name:"Nova Nodes", chainId:4663, maxSupply:2222,
-mintPriceEth:"0.001", maxMintPerWallet:20, maxCreatorMints:20, artStyle:"creature",
-artForm:"square", agentBaseURI:"https://agents.example.com/nova/"}` (symbol derived
-`NOVA`, description defaulted to `Nova Nodes — agent NFT collection.`, owner = the
-signing wallet) → **say "blocky robots, so `creature` + `square`" before deploying**, so
-the user can stop you while prepare is still free → deploy with no value → read back the
-rules → verify with the pack's fields → report the address, the explorer link, and that
-token `1`'s document points RESTAP clients at `https://agents.example.com/nova/1`.
+mintPriceEth:"0.001", maxMintPerWallet:20, maxCreatorMints:20, subject:"robot",
+agentBaseURI:"https://agents.example.com/nova/"}` (symbol derived `NOVA`, description
+defaulted to `Nova Nodes — agent NFT collection.`, owner = the signing wallet) →
+**say "robots, so the robot cast" before deploying**, so the user can stop you while
+prepare is still free → deploy with no value → read `subject()` back → verify with
+the pack's fields → report the address, the explorer link, and that token `1`'s
+document points RESTAP clients at `https://agents.example.com/nova/1`. A square
+silhouette is only the fallback when they asked for the built-in renderer, and you
+say that it is a silhouette.
 
 The same request with `artForm` omitted is now refused with `400 field:"artForm"` — that is
 the endpoint refusing to let a collection come back as the wide blob every other creature
@@ -481,7 +626,7 @@ costs nothing because no gas was spent.
 | "Create a collection called Pixie Market on Base, free mint, 1000 supply, no creator reserve" | prepare with `mintPriceEth:"0"`, `maxSupply:1000`, `maxCreatorMints:0`, `chainId:8453`, owner = wallet → deploy → verify → report |
 | "…and verify it" | verification fields from `verify`; never skip, never guess them |
 | "The art should be ghosts / robots / crystals, not more faces" | **draw it**: compose the SVG and `mintWithArt(to, svg)` per token. Only for tokens you are not drawing, map the subject to `artForm` (`ghost`→`blob`, `robot`→`square`, `crystal`→`diamond`, `alien`→`round`, `totem`→`tall`, `mushroom`→`arch`); `artSeed` only recolours, it never changes the shape |
-| "Deploy 20 rabbits to my wallet now" | prepare → deploy → then 20 × `mintWithArt(wallet, rabbitSvg)`, varying fur/ear colour per token. Say what you drew and what it costs in storage gas before the first call |
+| "Deploy 20 rabbits to my wallet now" | *Drawing a series*: card first. Drawn count 20, and the whole supply is the set, so `maxSupply` and `maxCreatorMints` are 20 unless they asked for a public mint of the silhouette. Prepare → deploy → 20 × `mintWithArt`. Token 2 changes an axis; it does not restyle the canvas. Say the byte length before the first call |
 | "Can I change my rabbit later?" | yes — `setMetadata(id, "image", svg)`; the holder owns that choice, no redeploy |
 | "Mint 3 for me" | `mint(3)` with exactly 3 × mint price attached |
 | "What has minted so far?" | read `totalSupply()` and `minted(<address>)` |
