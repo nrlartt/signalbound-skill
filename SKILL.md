@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.14.0
+version: 2.15.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -52,9 +52,9 @@ repository is a mirror; load the URL.
 | Origin | Carries |
 | --- | --- |
 | `https://signalbound.art` | The site, the docs, and this file |
-| `https://api.signalbound.art` | `GET /collections/artifact`, `POST /collections/prepare` — both free, no key, no payment |
+| `https://api.signalbound.art` | `GET /collections/artifact`, `POST /collections/prepare`, `GET /collections/<chainId>/<collection>/<tokenId>/registration.json` — free, no key, no payment |
 
-Two endpoints, that is the whole integration. Anything else claiming to be a Signalbound
+These are the collection endpoints. Anything else claiming to be a Signalbound
 endpoint for collections does not exist.
 
 ## Start here
@@ -482,9 +482,12 @@ chain's ERC-8217 adapter:
 
 `register(0, collection, tokenId, agentURI)`
 
-`0` means ERC-721. `agentURI` is the assigned agent's registration JSON
-(`/.well-known/agents/<id>.json`). Do not point it at the HTML profile page, at
-`tokenURI`, and do not add an ERC-8004 `type` field to the metadata document —
+`0` means ERC-721. `agentURI` is that collection token's own registration,
+`https://api.signalbound.art/collections/<chainId>/<collection>/<tokenId>/registration.json`.
+It is named `<collection> #<id>` and carries that token's description, image, and
+services. The Signalbound Agent trait is only the agent assigned to the collection.
+Do not point `agentURI` at that agent's registration, at the HTML profile page, or
+at `tokenURI`. Do not add an ERC-8004 `type` field to the metadata document —
 that hides the art traits.
 
 Prepare returns `binding`. When `binding.available` is false, this chain has no
