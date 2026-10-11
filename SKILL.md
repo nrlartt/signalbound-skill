@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.9.0
+version: 2.10.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -407,11 +407,24 @@ all:
     `An AI agent in the <name> collection.` the metadata document writes);
   - `metadata(id, "endpoint[restap]")` — `<agentBaseURI><id>`, empty when no base was set.
 - **Writes:** `setMetadata(id, key, value)` stores raw bytes and emits `MetadataSet`.
-  Keys are lowercase and case-sensitive; the reserved ones are `context`,
-  `endpoint[mcp]`, `endpoint[a2a]`, `endpoint[web]` and `address[<chain-id>]`
-  (20 raw address bytes) — any other `endpoint[<scheme>]` is allowed too.
-  `setContext(id, text)` and `setEndpoint(id, scheme, uri)` build the canonical key so
-  the brackets cannot be missed.
+  A written value wins over the automatic fallback, including empty bytes, so a
+  holder can clear `context`. Keys are case-sensitive. The reserved ones are
+  `context`, `endpoint[mcp]`, `endpoint[a2a]`, `endpoint[web]` and
+  `address[<chain-id>]`. Any other `endpoint[<scheme>]` is allowed too.
+  `setContext(id, text)` and `setEndpoint(id, scheme, uri)` build the canonical
+  key. `setEndpoint` lowercases the scheme, so `MCP` is stored as `endpoint[mcp]`.
+  `setAgentAddress(id, chainId, account)` stores the 20-byte account. `chainId`
+  is the ERC-7930 chain identifier, lowercase `0x` hex with a zero address
+  length — not the decimal chain id:
+
+  | Chain | chainId | `address` key |
+  | --- | --- | --- |
+  | Ethereum | 1 | `address[0x00010000010100]` |
+  | Base | 8453 | `address[0x0001000002210500]` |
+  | Robinhood Chain | 4663 | `address[0x0001000002123700]` |
+
+  A chain identifier that is not lowercase `0x` hex reverts `InvalidChainIdentifier`.
+  A scheme that is empty or not letters, digits and hyphens reverts `InvalidEndpointScheme`.
 - **Who may write:** only the token's owner or an approved operator — the same authority
   as moving the token, because the profile is the agent's identity. A stranger's write
   reverts with `ERC721InsufficientApproval`; a token that does not exist reverts with
