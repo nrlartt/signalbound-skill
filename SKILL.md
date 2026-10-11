@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.10.0
+version: 2.11.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -34,6 +34,10 @@ compiled contract, and you describe the collection and sign the deploy it hands 
 Every token is also an agent NFT: ERC-721 metadata carrying an optional RESTAP service
 entry, plus an ERC-8048 (ERC-721T) agent profile readable straight from the
 contract, so the collection deploys ready for agents to reach and for indexers to read.
+If a Signalbound agent is the one deploying, pass its token id as `deployerAgentId`
+and every on-chain token names that agent. OpenSea's Onchain agent binding panel is a
+separate registration, and it exists only on chains whose prepare reply has
+`binding.available` true.
 
 This file is canonical at `https://signalbound.art/skill.md`. A copy in the source
 repository is a mirror; load the URL.
@@ -85,6 +89,7 @@ back to you before you sign.
 | `artSeed` | on-chain art seed; derived from the name when omitted, so the same request always renders the same art |
 | `description` | optional; what every token's agent document says, see *Agent NFTs* |
 | `agentBaseURI` | optional; where each token's agent is served, see *Agent NFTs* |
+| `deployerAgentId` | optional; the Signalbound agent token id that is deploying. On-chain mode adds trait `Signalbound Agent` with that id on every token. Omit it when you do not know the id — do not guess. This trait is not the OpenSea binding panel |
 | `chainId` | not a constructor argument — prepare echoes it so you deploy on the right chain |
 
 **Ownership is a constructor argument on purpose.** An agent deploying through a factory
@@ -455,6 +460,32 @@ marketplace-ready `attributes`, from the same hash, so the two cannot disagree.
   really change the creature's face, and `form` really is the outline the body test
   draws. A trait that stopped describing the pixels would fail the collection's own
   tests.
+- **`Signalbound Agent`** is not a roll and not a row of `traits(id)`. It is the token
+  id of the Signalbound agent that deployed the collection, the same on every token,
+  and only when prepare was given `deployerAgentId`. Left out, the trait is absent.
+  Hosted mode does not write attributes in the contract: put the same trait in each
+  JSON file yourself. Read the id back with `deployerAgentId()`.
+
+### OpenSea "Onchain agent binding"
+
+The panel that shows an Agent ID and a Binding Contract is not a trait and not an
+ERC-8048 key. OpenSea shows it after the token's owner registers that token on the
+chain's ERC-8217 adapter:
+
+`register(0, collection, tokenId, agentURI)`
+
+`0` means ERC-721. `agentURI` is a URL you actually serve for that token. Do not point
+it at `tokenURI`, and do not add an ERC-8004 `type` field to the metadata document —
+that hides the art traits.
+
+Prepare returns `binding`. When `binding.available` is true, `binding.adapter` is the
+contract, `binding.signature` is the call, and `binding.args` is the shape (`0`, the
+collection, the token id, the URI). Send it once per minted token, from that token's
+owner, after the mint. When `binding.available` is false, this chain has no adapter.
+Robinhood Chain is one of those chains, so a collection deployed there will not show
+the panel. Ethereum and Base will, once the register transaction is confirmed. Do not
+invent an adapter address, and do not describe the panel as present when you did not
+send the call.
 
 ## Deploying a collection
 
@@ -497,6 +528,8 @@ sign. A mismatch stops the deploy — do not repair a field by editing `deployDa
 | `params.art.mode` | `onchain` or `metadata` |
 | `params.art.styleName`, `params.art.formName` | the world and the silhouette you already named. `formName` is null for mosaic, horizon and hosted art |
 | `params.description`, `params.agent.endpoint` | the document. `endpoint` is `<agentBaseURI><id>`, or null when no base was passed |
+| `params.deployerAgentId` | the Signalbound agent token id you passed, or null when you omitted it |
+| `binding.available` | true only when this chain has an ERC-8217 adapter. Follow `binding` after the mint; do not invent an adapter when it is false |
 | `verify` | the explorer fields, passed on unchanged |
 
 `creationBytecode` and `constructorArgs` are that same deploy split apart, for a tool
@@ -527,9 +560,16 @@ tokens. A public mint sends `mint.public.data` to the same address with
 `mint.public.valueWei` attached for one token — any other value reverts
 `WrongPayment`. Do not attach that value to the deploy. The deploy stays valueless.
 
+**Binding, after the mint.** If `binding.available` is true, the token owner then
+calls `binding.signature` on `binding.adapter` for each minted token, with
+`binding.args` filled in. That is the transaction OpenSea reads as Onchain agent
+binding. If `binding.available` is false, stop: the panel cannot appear on this
+chain. The `Signalbound Agent` trait, when `deployerAgentId` was passed, is already
+in the token and does not depend on this call.
+
 **Step 4 — read it back.** `owner()`, `name()`, `symbol()`, `totalSupply()`,
 `maxSupply()`, `mintPrice()`, `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()`,
-`agentBaseURI()`, `agentDescription()`, `artStyle()`, `artForm()`. Confirm the owner is the user's
+`agentBaseURI()`, `agentDescription()`, `deployerAgentId()`, `artStyle()`, `artForm()`. Confirm the owner is the user's
 wallet and the rules match the request — including the silhouette, because `artForm()`
 is what decides whether the collection looks like the subject they asked for. This, plus a receipt with `status: success`, is
 the only proof the deploy happened — an HTTP `200` is not. For an agent collection, also
@@ -616,6 +656,7 @@ Deploying on a chain the user did not name is a bug: ask, or follow what they sa
 | Name / symbol | 64 characters / 1–16 letters and digits |
 | `description` | 512 characters; no `"`, `\` or control characters — it is written into JSON |
 | `agentBaseURI` | optional http/https/ipfs URL; trailing slash appended by prepare |
+| `deployerAgentId` | optional positive integer, the Signalbound agent token id; omit when unknown |
 | `maxSupply` | 1–1,000,000 |
 | `maxMintPerWallet` | 1–`maxSupply`, cumulative |
 | `maxCreatorMints` | ≤ `maxSupply` |
