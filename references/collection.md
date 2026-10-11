@@ -10,7 +10,7 @@ to verify or a dependency tree to reconstruct.
 
 ## Constructor
 
-Fifteen arguments, in this order. `POST /collections/prepare` ABI-encodes them for you;
+Sixteen arguments, in this order. `POST /collections/prepare` ABI-encodes them for you;
 this table is what the encoded bytes mean.
 
 | # | Argument | Type | Rule |
@@ -30,11 +30,18 @@ this table is what the encoded bytes mean.
 | 12 | `artSeed` | `uint256` | Seed for the on-chain render; prepare derives one from the name when absent |
 | 13 | `description` | `string` | The `description` in every token's agent document; empty ⇒ contract writes `An AI agent in the <name> collection.`. No `"`, `\` or control characters |
 | 14 | `agentBaseURI` | `string` | Where each token's agent is served: endpoint = `<agentBaseURI><id>`. Empty ⇒ `"services": []`. No `"`, `\` or control characters |
+| 15 | `artForm` | `uint8` | `0` blob, `1` round, `2` square, `3` tall, `4` diamond, `5` arch. The creature silhouette; `mosaic` and `horizon` ignore it |
+
+`artForm` sits last on purpose, not by oversight. It was added after the other fifteen
+were already in production, and solc 0.8.26's IR pipeline fails to compile this contract
+with a second `uint8` anywhere earlier in the parameter list — a stack-too-deep failure
+in the ABI encoder that no amount of refactoring moved. Appending it compiles; moving it
+back to sit beside `artStyle` does not, so the odd ordering is load-bearing.
 
 Reverts at construction: `ZeroSupply`, `ZeroWalletCap`, `CreatorCapAboveSupply`,
-`UnknownArtStyle`, `InvalidRoyalty` (bps > 10000, or bps > 0 with a zero receiver),
-`InvalidMetadataString` (a name, description or agent base URI that would break the
-metadata JSON).
+`UnknownArtStyle`, `UnknownArtForm` (form > 5), `InvalidRoyalty` (bps > 10000, or bps >
+0 with a zero receiver), `InvalidMetadataString` (a name, description or agent base URI
+that would break the metadata JSON).
 
 The constructor is **not payable** — it takes no value, so the creation transaction
 carries only gas.
@@ -48,7 +55,7 @@ No transaction needed; an agent can phrase any of these as "Read `f()` on `<addr
 | `string` | `name()`, `symbol()`, `baseURI()`, `contractURI()`, `agentDescription()`, `agentBaseURI()` |
 | `address` | `owner()`, `royaltyReceiver()` |
 | `uint256` | `totalSupply()`, `maxSupply()`, `mintPrice()`, `maxMintPerWallet()`, `maxCreatorMints()`, `creatorMinted()`, `artSeed()`, `minted(address)` |
-| `uint8` | `artStyle()` |
+| `uint8` | `artStyle()`, `artForm()` |
 | `uint96` | `royaltyBps()` |
 | `bool` | `mintPaused()` |
 | `string` | `tokenURI(uint256)` — hosted `…/<id>.json`, or the on-chain metadata `data:application/json;base64,…` |
@@ -102,7 +109,7 @@ reentrant receiver sees the caps it just spent.
 | `NotOwner` | caller isn't the owner | Read `owner()` |
 | `ZeroOwner` | `transferOwnership(0)` | Ownership cannot be renounced to zero |
 | `InvalidMetadataString` | name, description or agent base URI carries `"`, `\` or a control character | Fix the field in prepare — a JSON string cannot carry them |
-| `ZeroSupply` / `ZeroWalletCap` / `CreatorCapAboveSupply` / `UnknownArtStyle` / `InvalidRoyalty` | constructor/royalty validation | Fix the field prepare named |
+| `ZeroSupply` / `ZeroWalletCap` / `CreatorCapAboveSupply` / `UnknownArtStyle` / `UnknownArtForm` / `InvalidRoyalty` | constructor/royalty validation | Fix the field prepare named |
 | `NothingToWithdraw` / `WithdrawFailed` | empty balance / rejected transfer | Check the balance or the owner's ability to receive |
 | `ERC721InvalidOwner` | `balanceOf(0)` | — |
 | `ERC721NonexistentToken` | id not minted | Ids start at 1 and exist only after mint |
@@ -122,15 +129,34 @@ live contract into (or out of) hosted mode, which is how a reveal is done.
 
 **On-chain (`baseURI` empty).** The contract renders a 16×16 mirrored pixel image and
 wraps it in the token's document (below); the image is the `image` field,
-still a `data:image/svg+xml;base64,…` URI. Traits come from `keccak256(artSeed, tokenId)`,
-so a token always renders the same bytes. Colour is computed as integer HSL — identical
-on every chain and compiler patch level.
+still a `data:image/svg+xml;base64,…` URI. Colour and texture traits come from
+`keccak256(artSeed, tokenId)`, so a token always renders the same bytes. Colour is
+computed as integer HSL — identical on every chain and compiler patch level.
+
+`artStyle` picks the world the collection lives in; `artForm` picks the shape of the
+subject inside it. They answer different questions, which is why both exist: every
+creature token shares one face — same eyes, same mouth, one of four extras — so the
+outline is the only thing that tells two creature collections apart.
 
 | `artStyle` | Name | Composition |
 | --- | --- | --- |
-| 0 | creature | Complementary ground, wide oval body, pattern (plain/stripes/spots), 2×2 eyes with pupil, mouth, and one of four extras: antenna, horns, ears, none |
+| 0 | creature | Complementary ground, a body whose outline is `artForm`, pattern (plain/stripes/spots), 2×2 eyes with pupil, mouth, and one of four extras: antenna, horns, ears, none |
 | 1 | mosaic | Four hues of one palette over a dark ground, per-cell hash scatter with gaps |
 | 2 | horizon | Gradient sky, centre sun, scattered stars, ground with a lit edge and a centre hill |
+
+| `artForm` | Name | Outline |
+| --- | --- | --- |
+| 0 | blob | A wide oval — the shape every creature collection drew before this existed |
+| 1 | round | A circle |
+| 2 | square | A blocky head with hard corners |
+| 3 | tall | A narrow vertical capsule |
+| 4 | diamond | A rhombus, widest across the middle |
+| 5 | arch | A domed top over a flat foot |
+
+`mosaic` and `horizon` ignore `artForm` entirely — they compose a scene rather than a
+body — so passing one there is harmless but means nothing. Every outline keeps rows 5 to
+11 of the grid, which is exactly where the eyes and the mouth are drawn, so the face
+furniture is never left floating off the body it belongs to.
 
 Mirroring: a cell's colour depends only on its distance from the vertical axis, so both
 halves are always identical.
@@ -215,15 +241,19 @@ const [names, values] = await readContract({ // string[], uint8[]
 });
 ```
 
-One table per art style, sized to what the style genuinely varies — six rows for
+One table per art style, sized to what the style genuinely varies — seven rows for
 creature, five for the other two, because a fixed-size table would have had to invent
 rows that mean nothing:
 
 | Style | Rows |
 | --- | --- |
-| `creature` (0) | `background`, `body`, `pattern`, `eyes`, `mouth`, `accessory` |
+| `creature` (0) | `background`, `body`, `pattern`, `eyes`, `mouth`, `accessory`, `form` |
 | `mosaic` (1) | `background`, `primary`, `accent`, `tile`, `density` |
 | `horizon` (2) | `sky`, `sun`, `ground`, `star`, `cloud` |
+
+`form` is the one row every token in a collection shares: it mirrors the `artForm` the
+collection was deployed with, because the silhouette is a decision about the collection
+rather than a roll per token. Everything else is per token.
 
 Colour rows are one of twelve named hue bands: `red`, `orange`, `yellow`, `chartreuse`,
 `green`, `spring`, `cyan`, `azure`, `blue`, `violet`, `magenta`, `rose`. Each other row
@@ -236,6 +266,7 @@ rather than as a neighbouring word it was never given:
 | `eyes` | `round`, `wide`, `narrow`, `bright` |
 | `mouth` | `thin`, `small`, `wide`, `open` |
 | `accessory` | `none`, `antenna`, `horns`, `ears` |
+| `form` | `blob`, `round`, `square`, `tall`, `diamond`, `arch` |
 | `tile` | `fine`, `banded`, `coarse`, `blocky` |
 | `density` | `dense`, `balanced`, `airy` |
 | `star` | `few`, `some`, `many` |
@@ -299,6 +330,7 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
 | `royaltyReceiver` | `0x` address | no | defaults to `owner`; with neither, a nonzero `royaltyBps` is a `400` |
 | `royaltyBps` | integer or string | no | `500` (5%); 0–10000 |
 | `artStyle` | `0`–`2` or `creature` / `mosaic` / `horizon` | no | `0` — only used in on-chain mode |
+| `artForm` | `0`–`5` or `blob` / `round` / `square` / `tall` / `diamond` / `arch` | no | `0` — creature only; `mosaic` and `horizon` ignore it |
 | `artSeed` | integer or string | no | derived from `keccak256(name)` so the same request always deploys the same art |
 
 ### Response (`200`)
@@ -309,7 +341,7 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
   "contract": "SignalCollection",
   "chainId": 4663,                       // or null when none was given
   "creationBytecode": "0x…",
-  "constructorArgs": "0x…",              // the 15 arguments, ABI-encoded
+  "constructorArgs": "0x…",              // the 16 arguments, ABI-encoded
   "deployData": "0x…",                   // creationBytecode + constructorArgs
   "params": {                            // echo of everything encoded — read it back
     "name": "Nova Nodes",
@@ -324,7 +356,15 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
     "description": "Nova Nodes — agent NFT collection.",
     "agent": { "baseURI": "https://agents.example.com/nova/", "endpoint": "https://agents.example.com/nova/<id>" },
     "royalty": { "receiver": "0x…", "bps": "500" },
-    "art": { "mode": "onchain", "baseURI": null, "style": 0, "styleName": "creature", "seed": "…" }
+    "art": {
+      "mode": "onchain",
+      "baseURI": null,
+      "style": 0,
+      "styleName": "creature",
+      "form": 2,
+      "formName": "square",
+      "seed": "…"
+    }
   },
   "compiler": { /* as the artifact */ },
   "verify": {
@@ -340,7 +380,9 @@ Free, `POST` only, body `application/json`, `Cache-Control: no-store`, CORS `*`.
 ```
 
 `params.agent.baseURI` and `params.agent.endpoint` are `null` when no `agentBaseURI`
-was passed.
+was passed. `params.art.form` and `params.art.formName` are `null` when a `baseURI` was
+passed, or when `artStyle` is not `creature` — the echo declines to report a silhouette
+that will not be drawn rather than implying a request was honoured.
 
 ### Status codes
 
@@ -365,5 +407,6 @@ was passed.
 | Royalty | 0–10000 bps, receiver required above 0 |
 | `mintPrice` | < 1,000,000 ETH (sanity ceiling) |
 | Art styles | 0, 1, 2 |
-| Creation code | 26,403 bytes (≈53 KB hex) |
-| Runtime code | 23,208 bytes / 24,576 limit |
+| Art forms | 0, 1, 2, 3, 4, 5 — creature only, ignored otherwise |
+| Creation code | 27,045 bytes (≈54 KB hex) |
+| Runtime code | 23,705 bytes / 24,576 limit |

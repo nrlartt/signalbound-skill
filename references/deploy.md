@@ -74,7 +74,7 @@ forge create contracts/SignalCollection.sol:SignalCollection \
   --constructor-args "$NAME" "$SYMBOL" "$OWNER" "$MAX_SUPPLY" "$MINT_PRICE" \
     "$MAX_PER_WALLET" "$CREATOR_MINTS" "$BASE_URI" "$CONTRACT_URI" \
     "$ROYALTY_RECEIVER" "$ROYALTY_BPS" "$ART_STYLE" "$ART_SEED" \
-    "$DESCRIPTION" "$AGENT_BASE_URI" \
+    "$DESCRIPTION" "$AGENT_BASE_URI" "$ART_FORM" \
   --evm-version paris --optimizer-runs 200
 ```
 
@@ -90,8 +90,10 @@ An HTTP `200` means a transaction you may have sent, not one that landed. All fo
    say so; redeploy passing `owner`, do not paper over it with a silent
    `transferOwnership` the user did not ask for.
 3. **Rules** — `name()`, `symbol()`, `totalSupply()` (0), `maxSupply()`, `mintPrice()`,
-   `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()` or `artStyle()`,
-   `agentBaseURI()`, `agentDescription()`, `royaltyBps()` match `params`.
+   `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()` or `artStyle()` and
+   `artForm()`, `agentBaseURI()`, `agentDescription()`, `royaltyBps()` match `params`.
+   `artForm()` is the one that decides whether the collection looks like the subject the
+   user asked for, so read it rather than assuming prepare passed it through.
 4. **Verification** — see `verification.md`. Unverified is a real state to report, not
    a detail to skip.
 
