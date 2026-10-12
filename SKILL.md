@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.16.0
+version: 2.17.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -615,13 +615,13 @@ block explorer asks for:
 | Contract name | `SignalCollection`. This is the Solidity contract. The collection title is `name()`, not this identifier. Do not verify the source under any other contract name |
 | Source | `source` in `GET /collections/artifact` — the complete file, no imports to reconstruct |
 | Compiler version | `verify.compiler`, e.g. `0.8.26+commit.8a97fa7a` |
-| Optimization | `verify.optimizerRuns` — `200`, enabled |
+| Optimization | `verify.optimizerRuns` — `1`, enabled |
 | EVM version | `verify.evmVersion` — `paris`; do not accept a tool's "default" |
 | Constructor arguments | `verify.constructorArgs` — already ABI-encoded, paste as hex |
 
 With Bankr: "Verify contract <address> on <chain> as SignalCollection with this source, compiler …, optimizer
-runs 200, EVM version paris, constructor args …". On an explorer form: single-file
-Solidity, contract name `SignalCollection`, paste the artifact source, pick the version, optimization yes / runs 200, EVM version
+runs 1, EVM version paris, constructor args …". On an explorer form: single-file
+Solidity, contract name `SignalCollection`, paste the artifact source, pick the version, optimization yes / runs 1, EVM version
 paris, paste the constructor arguments. Do not rename the contract in the source, and do not reuse another collection's verified source. Re-verification with different settings fails
 loudly — re-read `verify`, do not guess.
 
@@ -688,7 +688,7 @@ Deploying on a chain the user did not name is a bug: ask, or follow what they sa
 | `mintPrice` | below 1,000,000 ETH (sanity check) |
 | Art styles | 0 creature, 1 mosaic, 2 horizon |
 | Art forms | 0 blob, 1 round, 2 square, 3 tall, 4 diamond, 5 arch — creature only, ignored otherwise |
-| Deploy bytecode | under the 24 KB runtime limit; read `deployedBytecodeSize` from the artifact rather than guessing |
+| Deploy bytecode | under the 24 KB runtime limit; read `deployedBytecodeSize` from the artifact. The cast is constructor data, not runtime code, so a large sheet is not what hits that limit |
 | Prepare | `POST`, free, no key; `400` names the offending field |
 
 ## Prompt examples
@@ -750,7 +750,7 @@ costs nothing because no gas was spent.
 | `NotOwner` | signer is not the owner | check `owner()`; ownership is a constructor argument, not a guess |
 | `InvalidMetadataString` | a name, description or agent URL carries `"`, `\` or a control character | fix that field in prepare — a JSON string cannot carry them |
 | `ERC721NonexistentToken` | token id does not exist | ids start at 1 and only exist after mint |
-| Explorer rejects verification | settings mismatch | re-read `verify` — version, runs 200, `paris`, encoded args |
+| Explorer rejects verification | settings mismatch | re-read `verify` — version, runs 1, `paris`, encoded args |
 | Deploy succeeded, `owner()` is not the user | the factory became owner | stop, say what happened, redeploy passing `owner` |
 | Out of gas / insufficient funds | deployer pays the deploy gas | the user's wallet needs the chain's native token |
 
