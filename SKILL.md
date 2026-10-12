@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.15.0
+version: 2.16.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -40,9 +40,10 @@ bound agents only: the tokens whose ERC-8217 identity they control. Do not pass 
 and do not ask the user for one. Read `params.deployerAgentId`
 and `params.deployerAgentPool` from this response and deploy that exact
 `deployData`. Every on-chain token then carries that agent as the `Signalbound Agent`
-trait. OpenSea's Onchain agent binding panel is a separate transaction,
-`binding.calls`, and it exists only on chains whose prepare reply has
-`binding.available` true.
+trait. On Ethereum and Base, mint registers each token before it has an owner,
+so the OpenSea panel does not need a second transaction. `binding.calls` is only
+for a collection deployed from an earlier artifact. Robinhood Chain has no
+adapter, so a mint there stays an NFT with the trait and no panel.
 
 This file is canonical at `https://signalbound.art/skill.md`. A copy in the source
 repository is a mirror; load the URL.
@@ -477,8 +478,12 @@ marketplace-ready `attributes`, from the same hash, so the two cannot disagree.
 ### OpenSea "Onchain agent binding"
 
 The panel that shows an Agent ID and a Binding Contract is not a trait and not an
-ERC-8048 key. OpenSea shows it after the token's owner registers that token on the
-chain's ERC-8217 adapter:
+ERC-8048 key. On Ethereum and Base this artifact's `mint`, `mintToCreator` and
+`mintWithArt` register the token before it has an owner. That is the whole
+registration. Do not send `register` again afterwards: a second call opens a
+second identity for the same token. `binding.calls` is only for a collection
+deployed from an earlier artifact, whose mint did not register. OpenSea shows the
+panel after it indexes that registration:
 
 `register(0, collection, tokenId, agentURI)`
 
@@ -577,14 +582,13 @@ tokens. A public mint sends `mint.public.data` to the same address with
 `mint.public.valueWei` attached for one token — any other value reverts
 `WrongPayment`. Do not attach that value to the deploy. The deploy stays valueless.
 
-**Binding, after the mint.** If `binding.available` is false, stop: the panel cannot
-appear on this chain. If it is true, call prepare again with `collection` set to the
-deployed address and `bindCount` set to `totalSupply()` (at most 20; continue with
-`bindFrom`). Send every `binding.calls` entry to its `to` with its `data` and value
-`0`, from the owner of that token. That is the transaction OpenSea reads as Onchain
-agent binding. Do not redeploy. The `Signalbound Agent` trait is already in a new
-collection and does not depend on this call. A collection deployed before this
-assignment has no such trait; the register calls can still add the panel.
+**Binding.** On Ethereum and Base the mint you just sent already registered each
+token before it had an owner. Do not send `binding.calls` for that collection. If
+the creator mint runs out of gas, send `mintToCreator` again with a smaller
+quantity; each token still registers. On a chain where `binding.available` is
+false, the panel cannot appear. `binding.calls` is the repair for a collection
+deployed from an earlier artifact: call prepare again with `collection` and
+`bindCount`, and send each call from the token owner. Do not redeploy.
 
 **Step 4 — read it back.** `owner()`, `name()`, `symbol()`, `totalSupply()`,
 `maxSupply()`, `mintPrice()`, `maxMintPerWallet()`, `maxCreatorMints()`, `baseURI()`,
