@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.17.0
+version: 2.18.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -40,10 +40,10 @@ bound agents only: the tokens whose ERC-8217 identity they control. Do not pass 
 and do not ask the user for one. Read `params.deployerAgentId`
 and `params.deployerAgentPool` from this response and deploy that exact
 `deployData`. Every on-chain token then carries that agent as the `Signalbound Agent`
-trait. On Ethereum and Base, mint registers each token before it has an owner,
-so the OpenSea panel does not need a second transaction. `binding.calls` is only
-for a collection deployed from an earlier artifact. Robinhood Chain has no
-adapter, so a mint there stays an NFT with the trait and no panel.
+trait. On Ethereum and Base, mint holds the new token for a moment, registers
+it, then transfers it to the minter. That is one transaction. `binding.calls`
+is only for a collection deployed from an earlier artifact. Robinhood Chain has
+no adapter, so a mint there stays an NFT with the trait and no panel.
 
 This file is canonical at `https://signalbound.art/skill.md`. A copy in the source
 repository is a mirror; load the URL.
@@ -479,10 +479,11 @@ marketplace-ready `attributes`, from the same hash, so the two cannot disagree.
 
 The panel that shows an Agent ID and a Binding Contract is not a trait and not an
 ERC-8048 key. On Ethereum and Base this artifact's `mint`, `mintToCreator` and
-`mintWithArt` register the token before it has an owner. That is the whole
-registration. Do not send `register` again afterwards: a second call opens a
-second identity for the same token. `binding.calls` is only for a collection
-deployed from an earlier artifact, whose mint did not register. OpenSea shows the
+`mintWithArt` register the token while the collection still owns it, then
+transfer it to the minter. That is the whole registration. Do not send `register` again afterwards: a second call opens a second identity for the same
+token. A collection whose mint already reverted was built from the previous
+bytecode; deploy it again. `binding.calls` is only for a collection deployed
+from an earlier artifact, whose mint did not register. OpenSea shows the
 panel after it indexes that registration:
 
 `register(0, collection, tokenId, agentURI)`
@@ -583,7 +584,8 @@ tokens. A public mint sends `mint.public.data` to the same address with
 `WrongPayment`. Do not attach that value to the deploy. The deploy stays valueless.
 
 **Binding.** On Ethereum and Base the mint you just sent already registered each
-token before it had an owner. Do not send `binding.calls` for that collection. If
+token while the collection owned it, then transferred it to the minter. Do not
+send `binding.calls` for that collection. If
 the creator mint runs out of gas, send `mintToCreator` again with a smaller
 quantity; each token still registers. On a chain where `binding.available` is
 false, the panel cannot appear. `binding.calls` is the repair for a collection
