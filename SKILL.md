@@ -13,7 +13,7 @@ description: |
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.18.0
+version: 2.19.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -491,23 +491,25 @@ panel after it indexes that registration:
 `0` means ERC-721. `agentURI` is that collection token's own registration,
 `https://api.signalbound.art/collections/<chainId>/<collection>/<tokenId>/registration.json`.
 It is named `<collection> #<id>` and carries that token's description, image, and
-services. The Signalbound Agent trait is only the agent assigned to the collection.
+services. The same document includes `registrations`: `agentId` is this token's
+id and `agentRegistry` is `eip155:<chainId>:<collection>`. OpenSea attaches the
+panel from that entry. It also includes `supportedTrust`. The Signalbound Agent trait is only the agent assigned to the collection.
 Do not point `agentURI` at that agent's registration, at the HTML profile page, or
 at `tokenURI`. Do not add an ERC-8004 `type` field to the metadata document —
 that hides the art traits.
 
 Prepare returns `binding`. When `binding.available` is false, this chain has no
 adapter. Robinhood Chain is one of those chains, so a collection deployed there will
-not show the panel. When it is true, the deploy itself still does not create the
-panel. After the mint, call prepare again with the same body plus `collection` (the
-deployed address) and `bindCount` (how many tokens to bind, 1 to 20). `bindFrom`
-defaults to 1; raise it to continue past 20. The reply's `binding.calls` is the
-transactions. Send each one from that token's owner: `to`, `data`, value `0`. Do not
-send `deployData` again. Ethereum and Base show the panel once those transactions
-are confirmed and the marketplace has indexed them. The panel's Agent ID is a new
-identity the adapter creates. It is not the `Signalbound Agent` trait. Do not invent
-an adapter address, and do not describe the panel as present when you did not send
-the calls.
+not show the panel. When it is true, mint is what creates the identity. The panel appears after
+OpenSea indexes the registration document, not after a second `register`.
+`binding.calls` is only for a collection deployed from an earlier artifact, whose
+mint did not register. For that repair, call prepare again with `collection` and
+`bindCount` (1 to 20). `bindFrom` defaults to 1; raise it to continue past 20.
+Send each call from that token's owner, value `0`. Do not send those calls for a
+collection whose mint already registered, and do not send `deployData` again.
+The panel's Agent ID is the new identity the adapter creates. It is not the
+`Signalbound Agent` trait. Do not invent an adapter address, and do not describe
+the panel as present before the marketplace has indexed the registration.
 
 ## Deploying a collection
 
