@@ -8,12 +8,13 @@ description: |
   metadata carrying an optional RESTAP service entry, plus an ERC-8048 (ERC-721T) agent
   profile readable on-chain, and every token publishes the traits its art
   was drawn from. Use when a user asks to create or launch an NFT collection, verify a
-  deployed contract, mint from a collection, or read what a collection contract says.
+  deployed contract, mint from a collection, airdrop tokens from a collection to
+  holders of another asset, or read what a collection contract says.
   When the user names a subject — whatever the noun is — build a character cast for
   that subject and pass `subject` plus `cast`, so every token is painted from it.
   The built-in silhouette is not that subject. bird, rabbit and robot already have
   sheets; any other noun needs the cast you draw.
-version: 2.19.0
+version: 2.20.0
 license: CC0-1.0
 metadata:
   author: signalbound
@@ -654,6 +655,49 @@ Reads need no transaction and any agent can phrase them: "Read `totalSupply()` o
 owner action: `mintPrice()`, `mintPaused()`, `baseURI()`, `contractURI()`,
 `agentBaseURI()`, `royaltyBps()`.
 
+## Airdrop
+
+A collection has no `airdrop` function. Giving its tokens to holders of another
+asset is two owner-signed steps: mint them from the creator reserve, then
+transfer each one. The contract cannot read who holds an ERC-20 or another NFT
+collection, and this file has no airdrop endpoint to call.
+
+Set the size before deploy. `maxCreatorMints` and `maxSupply` are fixed for the
+life of the contract. `maxCreatorMints` must be at least the number of tokens
+the user will give away. `maxSupply` must be at least that number plus any
+public mint they still want. Read `maxCreatorMints()`, `creatorMinted()`,
+`maxSupply()` and `totalSupply()` on a collection that already exists. Stop
+when the remaining creator reserve, or the remaining supply, is below the
+count. Public `mint` is not a way around that: `maxMintPerWallet` caps the
+owner too.
+
+Name the rule before any signature. Say how many tokens, which asset, which
+chain that asset is on, and how the wallets are chosen: the N largest balances,
+or one token per holder at or above a minimum balance, read at one block. When
+holders outnumber the tokens, the rule decides who is in the list. Do not
+promise a token to every holder of that asset when there are more holders than
+tokens.
+
+Build the list from that read. One address per token, unless the user asked for
+more than one per wallet. Drop the zero address. Do not invent addresses. If
+the holder set cannot be read, stop and say the list is missing. Show the rule,
+the block, the count and the addresses, and wait until the user accepts the
+list. The accepted count is the number of tokens you will mint.
+
+Mint, then transfer. The owner calls `mintToCreator` with value `0`, in batches
+of at most 20, until the new token ids cover the list. On Ethereum and Base
+each of those mints registers the token while the collection owns it. Do not
+send `register` again. The new ids run from the `totalSupply()` before the
+first airdrop mint, plus one, through the `totalSupply()` after the last. The
+owner then calls `safeTransferFrom(owner, recipient, tokenId)` once per id, in
+list order. Read `ownerOf` on each id afterwards and report any token that is
+still the owner's. A drawn series can skip the transfer and call
+`mintWithArt(recipient, svg)` instead; that still spends the creator reserve,
+one token per call.
+
+The airdrop is done when `ownerOf` for every id in the accepted list is the
+recipient you named. An accepted list is not a completed send.
+
 Owner actions (signer must be the owner, else `NotOwner`): `setBaseURI`, `setContractURI`,
 `setAgentBaseURI`, `setAgentDescription`, `setMintPrice`, `setMintPaused(bool)`,
 `setRoyalty(receiver, bps)`, `withdraw()`, `transferOwnership(to)`. The caps never change.
@@ -736,6 +780,8 @@ costs nothing because no gas was spent.
 | "Make it 0.002 ETH now" | owner calls `setMintPrice`; the supply caps cannot change |
 | "Pause minting while we fix the site" | owner calls `setMintPaused(true)` |
 | "Who owns it?" | read `owner()` — if it is not the user's wallet, say so plainly |
+| "Airdrop 100 of these to the largest $BANKR holders" | On a new collection, set `maxCreatorMints` to at least 100 before deploy. Read the 100 largest balances at one block, show that list, and wait. Then `mintToCreator` in batches of at most 20 and `safeTransferFrom` each new id. If the remaining creator reserve is below 100, stop |
+| "Airdrop these to CryptoPunks holders" | Ask how many tokens and the rule: one per holder, or the N largest. If holders outnumber the remaining creator reserve, say so and do not mint a shorter list unless the user accepts that smaller count |
 
 ## When a call fails
 
@@ -750,6 +796,7 @@ costs nothing because no gas was spent.
 | `SoldOut` | `totalSupply` + order > `maxSupply` | read `totalSupply()`; nothing to do |
 | `MintingIsPaused` | owner paused minting | read `mintPaused()` and tell the user |
 | `CreatorCapExceeded` | reserve spent, or caller is not the owner | read `creatorMinted()` |
+| Airdrop count above the remaining creator reserve | `maxCreatorMints` is immutable | read `creatorMinted()` and `maxCreatorMints()`; do not mint a shorter list unless the user accepts a smaller count |
 | `EmptyArtwork` | `mintWithArt` was given `0x` | draw the SVG first and pass its bytes; an empty value would leave the token on the built-in render anyway |
 | `NotOwner` | signer is not the owner | check `owner()`; ownership is a constructor argument, not a guess |
 | `InvalidMetadataString` | a name, description or agent URL carries `"`, `\` or a control character | fix that field in prepare — a JSON string cannot carry them |
